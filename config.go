@@ -37,7 +37,7 @@ type config struct {
 	Web struct {
 		Path string `yaml:"Path" json:"path"`
 		Port string `yaml:"Port" json:"port"`
-		//TokenKey string `yaml:"Token_Key" json:"token_key"`
+		TokenKey string `yaml:"Token_Key" json:"token_key"`
 		ICP    string `yaml:"ICP" json:"icp"`
 		SSLCrt string `yaml:"SSLCrt" json:"ssl_crt"`
 		SSLKey string `yaml:"SSLKey" json:"ssl_key"`
@@ -259,16 +259,31 @@ func updatedb() {
 		"CREATE UNIQUE INDEX idx_users_callsign_unique ON users(callsign);",
 	}
 
-	// 逐条执行 SQL 语句并输出日志
+	// 记录已执行的迁移语句,保证每条只执行一次,避免每次启动重复执行
+	// (尤其是 DELETE/DROP 等破坏性或一次性语句),也不再刷无意义的错误日志。
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (stmt TEXT PRIMARY KEY, applied_at TEXT)`); err != nil {
+		log.Printf("create schema_migrations table err: %v", err)
+		return
+	}
+
 	for _, stmt := range sqlStatements {
-		log.Printf("Executing SQL: %s\n", stmt) // 输出当前执行的 SQL
+		var applied int
+		if err := db.QueryRow(`SELECT count(*) FROM schema_migrations WHERE stmt=?`, stmt).Scan(&applied); err != nil {
+			log.Printf("check migration err: %v, stmt: %s", err, stmt)
+			continue
+		}
+		if applied > 0 {
+			continue
+		}
+
+		log.Printf("Executing SQL: %s\n", stmt)
 		_, err := db.Exec(stmt)
 		if err != nil {
-			// 如果执行出错，打印错误日志
-			log.Printf("Error executing statement: %s\nError: %v\n", stmt, err)
-		} else {
-			// 如果执行成功，打印成功日志
-			log.Printf("Successfully executed: %s\n", stmt)
+			// 执行失败(如列已存在/索引不存在)也记录为已处理,避免每次启动重试刷日志。
+			log.Printf("Error executing statement: %s\nError: %v (recorded as applied, will not retry)\n", stmt, err)
+		}
+		if _, err := db.Exec(`INSERT OR IGNORE INTO schema_migrations(stmt, applied_at) VALUES(?, CURRENT_TIMESTAMP)`, stmt); err != nil {
+			log.Printf("record migration err: %v, stmt: %s", err, stmt)
 		}
 	}
 }

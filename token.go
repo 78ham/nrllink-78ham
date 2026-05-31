@@ -1,17 +1,27 @@
 package main
 
 import (
+	"crypto/rand"
 	"fmt"
-	"math/rand"
+	"log"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
-var TokenKey = RandString(32)
+var TokenKey []byte
 
-// 定义你的签名密钥
-//var jwtKey = []byte("BKWEUaKinE1te2ujmPGA")
+// initTokenKey 必须在 conf.init() 之后调用。
+// 优先使用配置中的固定密钥(重启不掉线、多实例通用),
+// 缺省时回退到 crypto/rand 随机密钥(进程重启会导致已签发 token 失效)。
+func initTokenKey() {
+	if conf.Web.TokenKey != "" {
+		TokenKey = []byte(conf.Web.TokenKey)
+		return
+	}
+	TokenKey = RandString(32)
+	log.Println("warning: Web.TokenKey 未配置,本次启动使用随机密钥,服务重启后所有登录令牌将失效,且多实例间令牌不通用")
+}
 
 // 定义 payload 的结构
 type Claims struct {
@@ -66,12 +76,10 @@ func ValidateToken(tokenString string) (*Claims, error) {
 	return claims, nil
 }
 
-func RandString(len int) []byte {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	bytes := make([]byte, len)
-	for i := range len {
-		b := r.Intn(26) + 65
-		bytes[i] = byte(b)
+func RandString(n int) []byte {
+	bytes := make([]byte, n)
+	if _, err := rand.Read(bytes); err != nil {
+		log.Fatal("generate random token key failed:", err)
 	}
 	return bytes
 }

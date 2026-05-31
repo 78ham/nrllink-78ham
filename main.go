@@ -23,6 +23,8 @@ func main() {
 
 	conf.init()
 
+	initTokenKey()
+
 	var err error
 
 	dbip, err = ipdb.NewCity(conf.System.IPfile)
