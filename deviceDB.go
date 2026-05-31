@@ -109,7 +109,7 @@ func checkdeviceOnline() {
 		t := time.Now()
 		onlineDeviceTotal := 0
 
-		for _, vv := range publicGroupMap {
+		for _, vv := range getPublicGroupSnapshot() {
 
 			change := false
 			vv.OnlineDevNumber = 0
@@ -193,9 +193,9 @@ func checkdeviceOnline() {
 
 		})
 
-		prevOnlineDeviceTotal := totalstats.OnlineDevNumber
+		prevOnlineDeviceTotal := getTotalStatsOnlineDev()
 		onlineDevMapStore(onlineMap)
-		totalstats.OnlineDevNumber = onlineDeviceTotal
+		setTotalStatsOnlineDev(onlineDeviceTotal)
 		if prevOnlineDeviceTotal == 0 && onlineDeviceTotal > 0 {
 			go func() {
 				if err := reportCurrentServerStatus(); err != nil {
@@ -261,7 +261,7 @@ func initAllDevList() {
 
 		devMapStore(callsignSSID, dev)
 
-		if kk, ok := publicGroupMap[dev.GroupID]; ok {
+		if kk, ok := getPublicGroup(dev.GroupID); ok {
 
 			kk.devMap[dev.ID] = dev
 			kk.DevList = append(kk.DevList, dev.ID)
@@ -272,7 +272,7 @@ func initAllDevList() {
 
 				dev.GroupID = 0
 
-				if kkk, ok := publicGroupMap[dev.GroupID]; ok {
+				if kkk, ok := getPublicGroup(dev.GroupID); ok {
 					kkk.devMap[dev.ID] = dev
 					kkk.DevList = append(kkk.DevList, dev.ID)
 
@@ -288,7 +288,7 @@ func initAllDevList() {
 
 					dev.GroupID = 0
 
-					if kkk, ok := publicGroupMap[dev.GroupID]; ok {
+					if kkk, ok := getPublicGroup(dev.GroupID); ok {
 						kkk.devMap[dev.ID] = dev
 						kkk.DevList = append(kkk.DevList, dev.ID)
 
@@ -853,9 +853,11 @@ func delDevice(dev *deviceInfo) error {
 
 	if d, ok := devMapLoad(dev.CallSignSSID); ok {
 		devMapDelete(dev.CallSignSSID)
-		delete(publicGroupMap[dev.GroupID].devMap, dev.ID)
-		if d.udpAddr != nil {
-			publicGroupMap[dev.GroupID].connPool.removeDevice(d.udpAddr.String())
+		if g, gok := getPublicGroup(dev.GroupID); gok {
+			delete(g.devMap, dev.ID)
+			if d.udpAddr != nil {
+				g.connPool.removeDevice(d.udpAddr.String())
+			}
 		}
 	}
 

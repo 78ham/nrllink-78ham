@@ -142,8 +142,10 @@ func (a *APRSTV) GetNRL() {
 
 	conf.PlatformList = []Platformitem{}
 
+	totalstatsMu.Lock()
 	totalstats.PlatformDevOnline = 0
 	totalstats.PlatformDevTotal = 0
+	totalstatsMu.Unlock()
 
 	if len(apiResponse.Data) == 0 {
 		conf.PlatformList = PlatformList
@@ -192,8 +194,10 @@ func (a *APRSTV) GetNRL() {
 			udpAddr: targetAddr,
 		}
 
+		totalstatsMu.Lock()
 		totalstats.PlatformDevOnline = totalstats.PlatformDevOnline + online
 		totalstats.PlatformDevTotal = totalstats.PlatformDevTotal + total
+		totalstatsMu.Unlock()
 
 		conf.PlatformList = append(conf.PlatformList, p)
 
@@ -244,6 +248,7 @@ func (a *APRSTV) GetNRLStat() {
 	}
 
 	// 打印解析后的数据
+	totalstatsMu.Lock()
 	for _, item := range apiResponse.Data {
 
 		switch item.Type {
@@ -258,6 +263,7 @@ func (a *APRSTV) GetNRLStat() {
 		}
 		//fmt.Printf("%s,%d\n", item.Type, item.Total)
 	}
+	totalstatsMu.Unlock()
 }
 
 func findNRL() {

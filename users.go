@@ -69,7 +69,8 @@ func (j *jsonapi) httpUserAllList(w http.ResponseWriter, req *http.Request) {
 	var emplist []userinfo
 	var total int
 
-	emplist, total = selectuser(queryToWhere("", *stb))
+	wh, _, p, sort := queryToWhere("", *stb)
+	emplist, total = selectuser(wh, p, sort)
 
 	rescode, _ := jsonextra.Marshal(emplist)
 
@@ -109,7 +110,8 @@ func (j *jsonapi) httpUserList(w http.ResponseWriter, req *http.Request) {
 	//stb.CurrentArea = strconv.Itoa(u.CurrentArea)
 	//员工漫游修改位常驻
 
-	emplist, total := selectuser(queryToWhere("", *stb))
+	wh, _, p, sort := queryToWhere("", *stb)
+	emplist, total := selectuser(wh, p, sort)
 
 	//emplist = selectuser()
 

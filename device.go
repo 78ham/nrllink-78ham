@@ -167,7 +167,7 @@ func (j *jsonapi) httpGroupDeviceList(w http.ResponseWriter, req *http.Request) 
 
 	} else {
 
-		if g, ok := publicGroupMap[grolupid]; ok {
+		if g, ok := getPublicGroup(grolupid); ok {
 
 			for _, v := range g.devMap {
 				if v.ISOnline {

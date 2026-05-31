@@ -443,7 +443,7 @@ func getMiniGroupList(u *userinfo) []minigroup {
 
 	grouplist := getUserGroupList(u)
 
-	for _, v := range publicGroupMap {
+	for _, v := range getPublicGroupSnapshot() {
 
 		g := minigroup{
 			ID:              v.ID,
@@ -513,7 +513,7 @@ func changeDevGroup(dev *deviceInfo, groupid int) (group string, err error) {
 
 	//检查目标组是否允许此设备加入
 
-	if g, ok := publicGroupMap[groupid]; ok {
+	if g, ok := getPublicGroup(groupid); ok {
 
 		if len(g.AllowCALLSSIDList) > 0 {
 			if !slices.Contains(g.AllowCALLSSIDList, dev.CallSignSSID) {
@@ -528,7 +528,7 @@ func changeDevGroup(dev *deviceInfo, groupid int) (group string, err error) {
 
 	if dev.GroupID >= 999 || dev.GroupID == 0 {
 
-		if g, ok := publicGroupMap[dev.GroupID]; ok {
+		if g, ok := getPublicGroup(dev.GroupID); ok {
 			g.connPool.removeDevice(dev.udpAddr.String())
 
 			delete(g.devMap, dev.ID)
@@ -553,7 +553,7 @@ func changeDevGroup(dev *deviceInfo, groupid int) (group string, err error) {
 
 	if groupid >= 999 || groupid == 0 {
 
-		if g, ok := publicGroupMap[groupid]; ok {
+		if g, ok := getPublicGroup(groupid); ok {
 			dev.GroupID = groupid
 			g.devMap[dev.ID] = dev
 			if dev.udpAddr != nil {
@@ -612,13 +612,13 @@ func addPublicGroup(pg *group) error {
 		return fmt.Errorf("群组添加失败")
 
 	}
-	if _, ok := publicGroupMap[newpg.ID]; !ok {
+	if _, ok := getPublicGroup(newpg.ID); !ok {
 		newpg.connPool = &currentConnPool{devConnMap: make(map[string]*deviceInfo)}
 		newpg.devMap = make(map[int]*deviceInfo, 10)
 		if newpg.Type == 7 {
 			newpg.startMixPCM()
 		}
-		publicGroupMap[newpg.ID] = newpg
+		setPublicGroup(newpg.ID, newpg)
 	}
 
 	//initPublicGroup()
@@ -640,7 +640,7 @@ func updatePublicGroup(pg *group) error {
 		return err
 	}
 
-	if p, ok := publicGroupMap[pg.ID]; ok {
+	if p, ok := getPublicGroup(pg.ID); ok {
 
 		p.Name = pg.Name
 
@@ -678,11 +678,11 @@ func deletePublicGroup(pg *group) error {
 		return err
 	}
 
-	if p, ok := publicGroupMap[pg.ID]; ok {
+	if p, ok := getPublicGroup(pg.ID); ok {
 		p.stopMixPCM()
 	}
 
-	delete(publicGroupMap, pg.ID)
+	deletePublicGroupByID(pg.ID)
 
 	return nil
 
@@ -692,7 +692,7 @@ func getGroupListForDevice(packet []byte) []byte {
 
 	grouplist := make([]minigroup, 0)
 
-	for _, v := range publicGroupMap {
+	for _, v := range getPublicGroupSnapshot() {
 
 		g := minigroup{
 			ID:              v.ID,

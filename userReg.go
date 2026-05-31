@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -33,7 +34,8 @@ func (j *jsonapi) httpRegisterList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	emplist, total := selectReguser(queryToWhere("", *stb))
+	wh, _, p, sort := queryToWhere("", *stb)
+	emplist, total := selectReguser(wh, p, sort)
 
 	rescode, _ := jsonextra.Marshal(emplist)
 
@@ -59,6 +61,7 @@ func (j *jsonapi) httpRegisterImage(w http.ResponseWriter, req *http.Request) {
 	}
 
 	result, _ := io.ReadAll(req.Body)
+	defer req.Body.Close()
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -73,6 +76,13 @@ func (j *jsonapi) httpRegisterImage(w http.ResponseWriter, req *http.Request) {
 	absPath, err := filepath.Abs(stb.Path) // 转换为绝对路径
 	if err != nil {
 		http.Error(w, "Invalid image path", http.StatusBadRequest)
+		return
+	}
+
+	// 防止路径遍历攻击，确保路径在允许的目录内
+	allowedDir, _ := filepath.Abs(conf.System.LicensePath)
+	if !strings.HasPrefix(absPath, allowedDir+string(os.PathSeparator)) && absPath != allowedDir {
+		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
 

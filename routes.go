@@ -75,7 +75,7 @@ func (j *jsonapi) httpSetRoutes(w http.ResponseWriter, req *http.Request) {
 
 	result, _ := io.ReadAll(req.Body)
 
-	// req.Body.Close()
+	req.Body.Close()
 
 	// stb := &routes{}
 	// err := jsonextra.Unmarshal(result, &stb)

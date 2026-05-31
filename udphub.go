@@ -431,10 +431,10 @@ func udpProcess(conn *net.UDPConn) {
 
 			} else {
 
-				publicGroupMapMu.RLock()
+				publicGroupMapMu.Lock()
 				publicGroupMap[0].devMap[d.ID] = d
 				NRL21parser(nrl, data[:n], d, conn, publicGroupMap[0])
-				publicGroupMapMu.RUnlock()
+				publicGroupMapMu.Unlock()
 
 			}
 

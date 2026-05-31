@@ -27,7 +27,10 @@ func chat(msglist []openai.ChatCompletionMessage) (string, error) {
 		return "", err
 	}
 
-	//fmt.Println(resp.Choices[0].Message.Content)
+	if len(resp.Choices) == 0 {
+		return "", nil
+	}
+
 	return resp.Choices[0].Message.Content, nil
 }
 

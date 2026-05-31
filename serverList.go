@@ -81,7 +81,7 @@ func startPlatformServerSync() {
 func waitForInitialOnlineStats(timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if totalstats.OnlineDevNumber > 0 {
+		if getTotalStatsOnlineDev() > 0 {
 			return
 		}
 		time.Sleep(500 * time.Millisecond)

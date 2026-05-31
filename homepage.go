@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -227,6 +228,11 @@ func (j *jsonapi) httpAdminHomepageImageUpload(w http.ResponseWriter, req *http.
 	}
 
 	ext := filepath.Ext(header.Filename)
+	allowedExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true, ".svg": true}
+	if !allowedExts[strings.ToLower(ext)] {
+		w.Write(ResParmErr)
+		return
+	}
 	filename := strconv.FormatInt(time.Now().UnixNano(), 36) + ext
 	filePath := filepath.Join(uploadDir, filename)
 
@@ -237,7 +243,11 @@ func (j *jsonapi) httpAdminHomepageImageUpload(w http.ResponseWriter, req *http.
 	}
 	defer out.Close()
 
-	written, _ := io.Copy(out, file)
+	written, err := io.Copy(out, file)
+	if err != nil {
+		w.Write(ResOpErr)
+		return
+	}
 
 	urlPath := "/uploads/" + time.Now().Format("2006-01") + "/" + filename
 	img := &HomepageImage{
