@@ -171,8 +171,10 @@ func syncPlatformServerList() error {
 		list[i].udpAddr = targetAddr
 	}
 
+	platformListMu.Lock()
 	PlatformList = list
 	conf.PlatformList = list
+	platformListMu.Unlock()
 	return nil
 }
 

@@ -13,8 +13,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/lib/pq"
 )
 
 func (j *jsonapi) httpWXMsg(w http.ResponseWriter, req *http.Request) {
@@ -358,7 +356,7 @@ type MPUserInfo struct {
 	MasterSchname  string         `json:"master_schname" db:"master_schname"`
 	SchoolID       int            `json:"school_id" db:"school_id"`     //当前校区
 	SchoolName     string         `json:"school_name" db:"school_name"` //当前校区名称
-	SchList        pq.StringArray `json:"sch_list" db:"sch_list"`
+	SchList        []string `json:"sch_list" db:"sch_list"`
 	ServerURL      string         `json:"server_url" db:"server_url"`
 	Phone          string         `json:"phone" db:"phone"`     // crm手机号
 	MPPhone        string         `json:"mpphone" db:"mpphone"` //微信小程序验证手机号
@@ -370,7 +368,7 @@ type MPUserInfo struct {
 	SubscribeTime  string         `json:"subscribe_time" db:"subscribe_time"`
 	Remark         string         `json:"remark" db:"remark"`
 	Groupid        int            `json:"groupid" db:"groupid"`
-	TagidList      pq.StringArray `json:"tagid_list" db:"tagid_list"`
+	TagidList      []string `json:"tagid_list" db:"tagid_list"`
 	SubscribeScene string         `json:"subscribe_scene" db:"subscribe_scene"`
 	QRscene        int            `json:"qr_scene" db:"qr_scene"`
 	QRsceneStr     string         `json:"qr_scene_str" db:"qr_scene_str"`
@@ -896,11 +894,11 @@ func addwxmsg(e *TextRequestBody) error {
 		user = &wxUserInfo{}
 	}
 
-	query := fmt.Sprintf(`INSERT INTO %v.wxmsg 
+	query := `INSERT INTO wxmsg 
 	(to_user_name,from_user_name,create_time,
 	msg_type,event,event_key,url,pic_url,media_id,thumb_media_id,content,
 	msg_id,location_x,location_y,label,timestamp) 
-	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())`, user.Schname)
+	VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`
 
 	_, err = db.Exec(query, e.ToUserName, e.FromUserName, e.CreateTime,
 		e.MsgType, e.Event, e.EventKey, e.URL, e.PicURL, e.MediaID, e.ThumbMediaID, e.Content,
@@ -1014,7 +1012,7 @@ func (j *jsonapi) httpMPPhoneCode(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	//检查密钥
-	if e.AccessKey != "wxphonecodekey" {
+	if conf.WeiXin.AccessKey == "" || e.AccessKey != conf.WeiXin.AccessKey {
 		w.Write(ResParmErr)
 		return
 	}

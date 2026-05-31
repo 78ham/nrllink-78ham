@@ -5,9 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
-
-	// _ "net/http/pprof"
-	// "github.com/jmoiron/sqlx"
+	"sync"
 
 	"github.com/gorilla/mux"
 	jsoniter "github.com/json-iterator/go"
@@ -41,6 +39,7 @@ type platforminfo struct {
 }
 
 var totalstats = totalStats{}
+var totalstatsMu sync.RWMutex
 
 type totalStats struct {
 	DevNumber           int `json:"dev_number"`
@@ -61,16 +60,19 @@ type totalStats struct {
 }
 
 func (j *jsonapi) httpTotalStats(w http.ResponseWriter, req *http.Request) {
+	sethttphead(w)
 
+	totalstatsMu.Lock()
 	totalstats.DevNumber = devMapLen()
 	totalstats.OnlineDevNumber = currentOnlineDeviceCount()
 	totalstats.UserNumber = 1000
-	//totalstats.UserNumber = len(userlist)
+	totalstatsMu.Unlock()
 
+	totalstatsMu.RLock()
 	rescode, _ := jsonextra.Marshal(totalstats)
+	totalstatsMu.RUnlock()
 
 	respone := fmt.Sprintf(`{"code":20000,"data":{"items":%s}}`, rescode)
-
 	w.Write([]byte(respone))
 }
 
@@ -102,11 +104,46 @@ func (j *jsonapi) httpplatformList(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte(respone))
 }
 
+func (j *jsonapi) httpHealth(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"status":"ok","service":"nrllink-udphub"}`))
+}
+
 func sethttphead(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Add("Access-Control-Allow-Headers", "Content-Type")
 	w.Header().Add("Access-Control-Allow-Headers", "x-token")
 	w.Header().Set("content-type", "application/json")
+}
+
+func addTotalStatsPacket() {
+	totalstatsMu.Lock()
+	totalstats.PacketNumber++
+	totalstatsMu.Unlock()
+}
+
+func addTotalStatsTraffic(n int) {
+	totalstatsMu.Lock()
+	totalstats.Traffic += n
+	totalstatsMu.Unlock()
+}
+
+func addTotalStatsVoiceTime(n int) {
+	totalstatsMu.Lock()
+	totalstats.VoiceTime += n
+	totalstatsMu.Unlock()
+}
+
+func setTotalStatsOnlineDev(n int) {
+	totalstatsMu.Lock()
+	totalstats.OnlineDevNumber = n
+	totalstatsMu.Unlock()
+}
+
+func getTotalStatsOnlineDev() int {
+	totalstatsMu.RLock()
+	defer totalstatsMu.RUnlock()
+	return totalstats.OnlineDevNumber
 }
 
 func writeJSONResponseItems(w http.ResponseWriter, data interface{}, total int) {
@@ -163,6 +200,10 @@ func writeJSONResponseOpError(w http.ResponseWriter) {
 }
 
 func allowWebsocketHandshake(config *websocket.Config, req *http.Request) error {
+	origin := req.Header.Get("Origin")
+	if origin != "" {
+		return nil
+	}
 	return nil
 }
 
@@ -277,8 +318,18 @@ func (j *jsonapi) msghttp() {
 	//http.HandleFunc("/area/wxuserlist", j.httpGetWeiXinUserList)
 	http.HandleFunc("/operatorlog/list", j.httpOperatorLogList)
 
-	//http.HandleFunc("/login", j.httplogin)
-	//http.HandleFunc("/reg", j.httpreg)
+	http.HandleFunc("/health", j.httpHealth)
+	http.HandleFunc("/api/homepage/sections", j.httpHomepageSections)
+	http.HandleFunc("/api/homepage/announcements", j.httpHomepageAnnouncements)
+	http.HandleFunc("/api/admin/homepage/sections", j.httpAdminHomepageSections)
+	http.HandleFunc("/api/admin/homepage/sections/update", j.httpAdminHomepageSectionsUpdate)
+	http.HandleFunc("/api/admin/homepage/sections/delete", j.httpAdminHomepageSectionsDelete)
+	http.HandleFunc("/api/admin/homepage/announcements/create", j.httpAdminHomepageAnnouncementsCreate)
+	http.HandleFunc("/api/admin/homepage/announcements/update", j.httpAdminHomepageAnnouncementsUpdate)
+	http.HandleFunc("/api/admin/homepage/announcements/delete", j.httpAdminHomepageAnnouncementsDelete)
+	http.HandleFunc("/api/admin/homepage/images/upload", j.httpAdminHomepageImageUpload)
+	http.HandleFunc("/api/admin/homepage/images/list", j.httpAdminHomepageImageList)
+	http.HandleFunc("/api/admin/homepage/images/delete", j.httpAdminHomepageImageDelete)
 
 	http.Handle("/ws", websocket.Server{
 		Handler:   websocket.Handler(upper),

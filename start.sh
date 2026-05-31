@@ -9,7 +9,7 @@ if [ ! -f "$conf" ] ; then
 fi
 
 
-if [  ! -f "$conf" ] ; then
+if [ ! -f "$dbfile" ] ; then
         cp $workdir/udphub.sqlite3 $workdir/data/
 fi
 

@@ -1,13 +1,12 @@
 module udphub
 
-go 1.25
+go 1.21
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/gorilla/mux v1.8.1
 	github.com/ipipdotnet/ipdb-go v1.3.3
 	github.com/json-iterator/go v1.1.12
-	github.com/lib/pq v1.10.9
 	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/sashabaranov/go-openai v1.41.2
 	golang.org/x/crypto v0.47.0

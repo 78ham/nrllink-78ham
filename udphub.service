@@ -1,14 +1,19 @@
 [Unit]
 Description=nrllink
 Documentation=https://bg6fcs.nrllink.net
-
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 WorkingDirectory=/nrllink
-ExecStart=/nrllink/udphub
+ExecStart=/nrllink/udphub -c /nrllink/conf/udphub.yaml
 Restart=always
 RestartSec=1s
 KillMode=mixed
+NoNewPrivileges=yes
+PrivateTmp=yes
+LimitNOFILE=65536
+LimitNPROC=4096
 
 [Install]
 WantedBy=multi-user.target

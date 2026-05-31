@@ -280,13 +280,12 @@ func getuserByID(id int) (*userinfo, error) {
 func getEmpListByRole(role string) ([]userinfo, int) {
 
 	emp := []userinfo{}
+	rolePattern := "%" + role + "%"
 
-	query := fmt.Sprintf(`SELECT id,name,callsign,gird,phone,password,birthday,mdcid,dmrid,
+	rows, err := db.Query(`SELECT id,name,callsign,gird,phone,password,birthday,mdcid,dmrid,
 	sex,avatar,address,roles,introduction,alarm_msg,status,update_time,last_login_time,
 	login_err_times,create_time,openid,nickname,pid,last_login_ip,expire_time FROM users
-	 where  roles like '%%%v%%'  ORDER BY id ASC`, role)
-
-	rows, err := db.Query(query)
+	 where  roles like ?  ORDER BY id ASC`, rolePattern)
 
 	if err != nil {
 		log.Println("按角色查询用户列表错误: ", err, '\n', query)
@@ -311,9 +310,7 @@ func getEmpListByRole(role string) ([]userinfo, int) {
 	}
 
 	var t int
-	q := fmt.Sprintf(`SELECT count(*) as total FROM users where  roles like '%%%v%%' ' `, role)
-	//fmt.Println(q)
-	row := db.QueryRow(q)
+	row := db.QueryRow(`SELECT count(*) as total FROM users where roles like ?`, rolePattern)
 	err = row.Scan(&t)
 
 	if err != nil {

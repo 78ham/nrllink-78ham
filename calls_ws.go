@@ -439,9 +439,10 @@ func canUserAccessGroup(u *userinfo, gp *group) bool {
 }
 
 func accessibleRooms(u *userinfo) map[string]*group {
-	rooms := make(map[string]*group, len(publicGroupMap)+3)
+	publicGroups := getPublicGroupSnapshot()
+	rooms := make(map[string]*group, len(publicGroups)+3)
 
-	for _, gp := range publicGroupMap {
+	for _, gp := range publicGroups {
 		if !canUserAccessGroup(u, gp) {
 			continue
 		}
@@ -969,20 +970,17 @@ func (j *jsonapi) wsCallStream(ws *websocket.Conn) {
 	}
 
 	tokenString := req.URL.Query().Get("token")
-	var user *userinfo
-	if tokenString != "" {
-		token, err := ValidateToken(tokenString)
-		if err != nil {
-			ws.Close()
-			return
-		}
+	token, err := ValidateToken(tokenString)
+	if err != nil {
+		ws.Close()
+		return
+	}
 
-		user, err = getuser(token.Username)
-		if err != nil || user.Status != 1 {
-			log.Println("websocket user lookup failed:", err)
-			ws.Close()
-			return
-		}
+	user, err := getuser(token.Username)
+	if err != nil || user.Status != 1 {
+		log.Println("websocket user lookup failed:", err)
+		ws.Close()
+		return
 	}
 
 	client := newWSCallClient(callWSHub, ws, user)

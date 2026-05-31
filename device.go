@@ -246,10 +246,10 @@ func (j *jsonapi) httpDevice(w http.ResponseWriter, req *http.Request) {
 func (j *jsonapi) httpDeviceQTH(w http.ResponseWriter, req *http.Request) {
 	sethttphead(w)
 
-	// _, err := checktoken(w, req)
-	// if err != nil {
-	// 	return
-	// }
+	_, err := checktoken(w, req)
+	if err != nil {
+		return
+	}
 
 	result, _ := io.ReadAll(req.Body)
 

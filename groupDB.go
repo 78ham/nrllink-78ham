@@ -7,10 +7,41 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 var publicGroupMap = make(map[int]*group, 1000) //key 房间号
+var publicGroupMapMu sync.RWMutex
+
+func getPublicGroup(id int) (*group, bool) {
+	publicGroupMapMu.RLock()
+	g, ok := publicGroupMap[id]
+	publicGroupMapMu.RUnlock()
+	return g, ok
+}
+
+func getPublicGroupSnapshot() map[int]*group {
+	publicGroupMapMu.RLock()
+	res := make(map[int]*group, len(publicGroupMap))
+	for k, v := range publicGroupMap {
+		res[k] = v
+	}
+	publicGroupMapMu.RUnlock()
+	return res
+}
+
+func setPublicGroup(id int, g *group) {
+	publicGroupMapMu.Lock()
+	publicGroupMap[id] = g
+	publicGroupMapMu.Unlock()
+}
+
+func deletePublicGroupByID(id int) {
+	publicGroupMapMu.Lock()
+	delete(publicGroupMap, id)
+	publicGroupMapMu.Unlock()
+}
 
 /*
 export const groupTypeOptions = [

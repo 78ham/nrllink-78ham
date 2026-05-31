@@ -123,9 +123,8 @@ type qth struct {
 }
 
 var (
-	QTHmapNew = make(map[string]qth) // callsign+ssid
-	QTHmap    = make(map[string]string)
 	qthMu     sync.RWMutex
+	platformListMu sync.RWMutex
 )
 
 func setQTH(callsignSSID, oldQTH string, newQTH qth) {
@@ -335,7 +334,9 @@ func udpProcess(conn *net.UDPConn) {
 			continue
 		}
 
+		totalstatsMu.Lock()
 		totalstats.PacketNumber++
+		totalstatsMu.Unlock()
 
 		callsignSSID := getCallsignSSID(nrl.CallSign, nrl.SSID)
 
@@ -349,7 +350,9 @@ func udpProcess(conn *net.UDPConn) {
 			//dev.udpAddr = nrl.UDPAddr
 			dev.LastPacketTime = nrl.timeStamp
 			dev.Traffic = dev.Traffic + 42 + 48 + len(nrl.DATA)
+			totalstatsMu.Lock()
 			totalstats.Traffic = totalstats.Traffic + 42 + 48 + len(nrl.DATA)
+			totalstatsMu.Unlock()
 
 			if nrl.DevModel != 200 {
 				NRL21SetDevDMRID(dev.DMRID, data[:n])
@@ -369,8 +372,7 @@ func udpProcess(conn *net.UDPConn) {
 
 			} else if dev.GroupID >= 999 || dev.GroupID == 0 {
 
-				//否则使用公共群组连接池
-				if p, ok := publicGroupMap[dev.GroupID]; ok {
+				if p, ok := getPublicGroup(dev.GroupID); ok {
 
 					NRL21parser(nrl, data[:n], dev, conn, p)
 				}
@@ -421,7 +423,7 @@ func udpProcess(conn *net.UDPConn) {
 				continue
 			}
 
-			if p, ok := publicGroupMap[d.GroupID]; ok {
+			if p, ok := getPublicGroup(d.GroupID); ok {
 
 				p.devMap[d.ID] = d
 
@@ -429,9 +431,10 @@ func udpProcess(conn *net.UDPConn) {
 
 			} else {
 
+				publicGroupMapMu.RLock()
 				publicGroupMap[0].devMap[d.ID] = d
-
 				NRL21parser(nrl, data[:n], d, conn, publicGroupMap[0])
+				publicGroupMapMu.RUnlock()
 
 			}
 
@@ -451,7 +454,8 @@ func groupForDevice(dev *deviceInfo) *group {
 			return u.(*userinfo).Groups[dev.GroupID]
 		}
 	}
-	return publicGroupMap[dev.GroupID]
+	p, _ := getPublicGroup(dev.GroupID)
+	return p
 }
 
 func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDPConn, gp *group) {
@@ -475,7 +479,7 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 
 		if td > 200 {
 			dev.LastVoiceBeginTime = nrl.timeStamp
-			logbuffer <- dev
+			select { case logbuffer <- dev: default: }
 			dev.Loged = true
 			if nrl.DevModel == 200 || (nrl.DevModel == 255 && nrl.SSID == 255) {
 				callWSHub.trackCallStart(gp, nrl.OriginalCallsign, nrl.OriginalSSID, nrl.timeStamp)
@@ -490,7 +494,9 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 		dev.LastVoiceEndTime = nrl.timeStamp
 
 		dev.VoiceTime = dev.VoiceTime + 63
+		totalstatsMu.Lock()
 		totalstats.VoiceTime = totalstats.VoiceTime + 63
+		totalstatsMu.Unlock()
 
 		// if gp.connPool.allowCALLSSID != "" && gp.connPool.allowCALLSSID != dev.CallSignSSID {
 		// 	return
@@ -530,7 +536,10 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 
 		//心跳包，用于保存设备在线存活状态， 目前设备1s一次发送
 		if !dev.Loged && nrl.timeStamp.Sub(dev.LastVoiceEndTime).Milliseconds() > 200 {
-			logbuffer <- dev
+			select {
+			case select { case logbuffer <- dev: default: }:
+			default:
+			}
 			dev.Loged = true
 		}
 
@@ -660,7 +669,7 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 
 		if td > 200 {
 			dev.LastVoiceBeginTime = nrl.timeStamp
-			logbuffer <- dev
+			select { case logbuffer <- dev: default: }
 			dev.Loged = true
 			if nrl.DevModel == 200 || (nrl.DevModel == 255 && nrl.SSID == 255) {
 				callWSHub.trackCallStart(gp, nrl.OriginalCallsign, nrl.OriginalSSID, nrl.timeStamp)
@@ -675,7 +684,9 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 		dev.LastVoiceEndTime = nrl.timeStamp
 
 		dev.VoiceTime = dev.VoiceTime + 20
+		totalstatsMu.Lock()
 		totalstats.VoiceTime = totalstats.VoiceTime + 20
+		totalstatsMu.Unlock()
 
 		// if gp.connPool.allowCALLSSID != "" && gp.connPool.allowCALLSSID != dev.CallSignSSID {
 		// 	return

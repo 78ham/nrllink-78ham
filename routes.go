@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -35,17 +34,10 @@ func getRoutes() *routes {
 }
 
 func setRoutes(route string) {
-
-	r := &routes{}
-
-	query := fmt.Sprintf("update  routes  set routes=%v", route)
-
-	row := db.QueryRow(query)
-	err := row.Scan(r)
+	_, err := db.Exec("UPDATE routes SET routes=?", route)
 	if err != nil {
-		log.Println("save routes err:", err, r)
+		log.Println("save routes err:", err)
 	}
-
 }
 
 func (j *jsonapi) httpGetRoutes(w http.ResponseWriter, req *http.Request) {
@@ -64,8 +56,7 @@ func (j *jsonapi) httpGetRoutes(w http.ResponseWriter, req *http.Request) {
 	// r := responseinfo{Code: 20000, Data: getRoutes()}
 	// rescode, _ := jsonextra.Marshal(r)
 	// w.Write(rescode)
-	res := fmt.Sprintf(`{"code":20000,"data":%v}`, string(getRoutes().Routes))
-	w.Write([]byte(res))
+	writeJSONResponseItem(w, jsoniter.RawMessage(getRoutes().Routes))
 
 }
 func (j *jsonapi) httpSetRoutes(w http.ResponseWriter, req *http.Request) {

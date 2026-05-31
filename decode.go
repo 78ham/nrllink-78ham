@@ -132,6 +132,10 @@ func (n *NRL21packet) decodeNRL21(d []byte) (err error) {
 
 	n.Length = binary.BigEndian.Uint16(d[4:6])
 
+	if int(n.Length) > len(d) {
+		return errors.New("packet length field exceeds data length")
+	}
+
 	n.DMRID = bytesToUint24(d[6:9])
 	n.Password = string(d[9:20])
 	n.Type = d[20]

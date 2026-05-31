@@ -81,6 +81,7 @@ type config struct {
 		PhoneCodeURL      string `yaml:"PhoneCodeURL" json:"phone_code_url"`
 		AvatarURL         string `yaml:"AvatarURL" json:"avatar_url"`
 		AccessToken       string
+		AccessKey         string `yaml:"AccessKey" json:"access_key"`
 		AppID             string `yaml:"AppID" json:"appid"`
 		AppSecret         string `yaml:"AppSecret" json:"appsecret"`
 		EncodingAESKey    string `yaml:"EncodingAESKey" json:"encodingaeskey"`
@@ -154,7 +155,8 @@ func (c *config) init() {
 	err = yaml.Unmarshal(yamlFile, conf)
 
 	if err != nil {
-		log.Fatalf("Unmarshal: %v \n %s", err, yamlFile)
+		log.Printf("Unmarshal config error: %v", err)
+		os.Exit(1)
 	}
 
 	// c.Parm.iDCfilterIPMap = make(map[uint32]bool, 0)
