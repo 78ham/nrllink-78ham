@@ -36,9 +36,78 @@ var mdcidmap sync.Map //key mdcid, value callsign
 var dmridmap sync.Map //key dmrid, value callsign
 
 var devCallsignSSIDMap = make(map[string]*deviceInfo, 1000) //key : callsign+ssid 在线设备列表
+var devMapMu sync.RWMutex                                    //保护 devCallsignSSIDMap 的并发读写
 
 var onlinedevMap = make(map[int]*deviceInfo, 1000) //所有设备列表
+var onlineDevMapMu sync.RWMutex                    //保护 onlinedevMap 的整体替换与读取
 //var offlineDevList devlist
+
+// devMapStore 写入/覆盖一个设备条目
+func devMapStore(key string, dev *deviceInfo) {
+	devMapMu.Lock()
+	devCallsignSSIDMap[key] = dev
+	devMapMu.Unlock()
+}
+
+// devMapLoad 读取一个设备条目
+func devMapLoad(key string) (*deviceInfo, bool) {
+	devMapMu.RLock()
+	d, ok := devCallsignSSIDMap[key]
+	devMapMu.RUnlock()
+	return d, ok
+}
+
+// devMapDelete 删除一个设备条目
+func devMapDelete(key string) {
+	devMapMu.Lock()
+	delete(devCallsignSSIDMap, key)
+	devMapMu.Unlock()
+}
+
+// devMapLen 返回设备条目数量
+func devMapLen() int {
+	devMapMu.RLock()
+	n := len(devCallsignSSIDMap)
+	devMapMu.RUnlock()
+	return n
+}
+
+// devMapSnapshot 返回 map 的浅拷贝,供遍历使用,避免遍历期间被并发修改
+func devMapSnapshot() map[string]*deviceInfo {
+	devMapMu.RLock()
+	res := make(map[string]*deviceInfo, len(devCallsignSSIDMap))
+	for k, v := range devCallsignSSIDMap {
+		res[k] = v
+	}
+	devMapMu.RUnlock()
+	return res
+}
+
+// onlineDevMapStore 整体替换在线设备 map
+func onlineDevMapStore(m map[int]*deviceInfo) {
+	onlineDevMapMu.Lock()
+	onlinedevMap = m
+	onlineDevMapMu.Unlock()
+}
+
+// onlineDevMapLen 返回在线设备数量
+func onlineDevMapLen() int {
+	onlineDevMapMu.RLock()
+	n := len(onlinedevMap)
+	onlineDevMapMu.RUnlock()
+	return n
+}
+
+// onlineDevMapSnapshot 返回在线设备 map 的浅拷贝,供遍历使用
+func onlineDevMapSnapshot() map[int]*deviceInfo {
+	onlineDevMapMu.RLock()
+	res := make(map[int]*deviceInfo, len(onlinedevMap))
+	for k, v := range onlinedevMap {
+		res[k] = v
+	}
+	onlineDevMapMu.RUnlock()
+	return res
+}
 
 var ServerMap = make(map[string]*deviceInfo) //呼号对应的服务器设备
 
@@ -270,7 +339,7 @@ func udpProcess(conn *net.UDPConn) {
 
 		callsignSSID := getCallsignSSID(nrl.CallSign, nrl.SSID)
 
-		if dev, ok := devCallsignSSIDMap[callsignSSID]; ok {
+		if dev, ok := devMapLoad(callsignSSID); ok {
 			if nrl.Type == 2 && refreshDeviceAccountExpired(dev, nrl.timeStamp) {
 				removeExpiredDeviceFromPool(dev, groupForDevice(dev))
 				log.Printf("billing: expired account heartbeat ignored: %v-%v expire check at %v", dev.CallSign, dev.SSID, dev.LastExpireCheck.Format("2006-01-02 15:04:05"))
@@ -346,7 +415,7 @@ func udpProcess(conn *net.UDPConn) {
 
 			d.pcmBuffer = make([]int, 1000)
 
-			devCallsignSSIDMap[callsignSSID] = d
+			devMapStore(callsignSSID, d)
 			if nrl.Type == 2 && refreshDeviceAccountExpired(d, nrl.timeStamp) {
 				log.Printf("billing: expired account new device heartbeat ignored: %v-%v", d.CallSign, d.SSID)
 				continue

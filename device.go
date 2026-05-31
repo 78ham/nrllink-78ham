@@ -44,7 +44,8 @@ func (j *jsonapi) httpDevicesList(w http.ResponseWriter, req *http.Request) {
 	if stb.IsOnline {
 		emplist, total = getOnlineDevicelist(stb.Limit, stb.Page, stb.Callsign, stb.GroupID, stb.Sort)
 	} else {
-		emplist, total = getDevicelist(queryToWhere("", *stb))
+		w, args, p, sort := queryToWhere("", *stb)
+		emplist, total = getDevicelist(w, args, p, sort)
 
 	}
 
@@ -88,7 +89,9 @@ func (j *jsonapi) httpDeviceList(w http.ResponseWriter, req *http.Request) {
 
 	onlineDeviceTotal := 0
 
-	for _, vv := range devCallsignSSIDMap {
+	devSnapshot := devMapSnapshot()
+
+	for _, vv := range devSnapshot {
 
 		if vv.ISOnline {
 			onlineDeviceTotal++
@@ -111,7 +114,7 @@ func (j *jsonapi) httpDeviceList(w http.ResponseWriter, req *http.Request) {
 	rescode, _ := jsonextra.Marshal(devicelist)
 
 	respone := fmt.Sprintf(`{"code":20000,"data":{"total":%v,"items":%s}}`,
-		len(devCallsignSSIDMap), rescode)
+		len(devSnapshot), rescode)
 
 	w.Write([]byte(respone))
 
@@ -199,9 +202,9 @@ func (j *jsonapi) httpMyDeviceList(w http.ResponseWriter, req *http.Request) {
 
 	mydevicelist := make(map[string]*deviceInfo, 10)
 
-	for kk, vv := range devCallsignSSIDMap {
+	for kk, vv := range devMapSnapshot() {
 		if vv.CallSign == u.CallSign {
-			mydevicelist[kk] = devCallsignSSIDMap[kk]
+			mydevicelist[kk] = vv
 		}
 
 	}
@@ -231,7 +234,7 @@ func (j *jsonapi) httpDevice(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if dev, ok := devCallsignSSIDMap[getCallsignSSID(stb.Callsign, stb.SSID)]; ok {
+	if dev, ok := devMapLoad(getCallsignSSID(stb.Callsign, stb.SSID)); ok {
 
 		writeJSONResponseItem(w, dev)
 	} else {

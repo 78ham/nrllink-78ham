@@ -27,17 +27,17 @@ type deviceInfo struct {
 	DevModel        byte   `json:"dev_model" db:"dev_model"` //设备型号
 	VoiceServerIP   string `json:"voice_server_ip"`
 	VoiceServerPort string `json:"voice_server_port"`
-	CallSign        string `json:"callsign" db:"callsign"`             //所有者呼号
+	CallSign        string `json:"callsign" db:"callsign"`             //所有者呼�?
 	SSID            byte   `json:"ssid" db:"ssid"`                     //所有者SSID
-	Priority        int    `json:"priority" db:"priority"`             //优先级 默认100， 数字大优先
+	Priority        int    `json:"priority" db:"priority"`             //优先�?默认100�?数字大优�?
 	CallSignSSID    string `json:"callsignssid"`                       //callsign+ssid
 	GroupID         int    `json:"group_id" db:"group_id"`             //内置群租编号
 	GroupPassword   string `json:"group_password" db:"group_password"` //加入组的密码
 	QTH             string `json:"qth"`
-	Status          int    `json:"status" db:"status"`       //状态  0 正常   1 禁用接收  2 禁用发射  3 禁止发射和接收 4 透明转发
-	RFType          int    `json:"rf_type" db:"rf_type"`     //连接的射频设备类型：  0:无连接， 1,内置1W模块，2，内置2W模块，3，外接moto3188，4,moto3688, 5，外接yaesu，6，外接，icom，7，外接其它
-	ISCerted        bool   `json:"is_certed" db:"is_certed"` //是否认证过
-	Traffic         int    `json:"traffic"`                  //流量消耗
+	Status          int    `json:"status" db:"status"`       //状�? 0 正常   1 禁用接收  2 禁用发射  3 禁止发射和接�?4 透明转发
+	RFType          int    `json:"rf_type" db:"rf_type"`     //连接的射频设备类型：  0:无连接， 1,内置1W模块�?，内�?W模块�?，外接moto3188�?,moto3688, 5，外接yaesu�?，外接，icom�?，外接其�?
+	ISCerted        bool   `json:"is_certed" db:"is_certed"` //是否认证�?
+	Traffic         int    `json:"traffic"`                  //流量消�?
 
 	udpAddr    *net.UDPAddr
 	udpSocket  *net.UDPConn
@@ -47,25 +47,25 @@ type deviceInfo struct {
 	ISOnline   bool           `json:"is_online" `                   //当前是否在线
 	ChanName   pq.StringArray `json:"chan_name" db:"chan_name"`     //射频信道名称
 
-	LastPacketTime  time.Time `json:"last_packet_time" ` //最后一次报文时间
-	AccountExpired  bool      `json:"account_expired"`   //所属账号是否到期
-	LastExpireCheck time.Time `json:"last_expire_check"` //最后一次账号到期检查时间
+	LastPacketTime  time.Time `json:"last_packet_time" ` //最后一次报文时�?
+	AccountExpired  bool      `json:"account_expired"`   //所属账号是否到�?
+	LastExpireCheck time.Time `json:"last_expire_check"` //最后一次账号到期检查时�?
 
 	VoiceTime          int       `json:"voice_time"`            //通话时长
-	LastVoiceBeginTime time.Time `json:"last_voice_begin_time"` //上次语音开始时间
-	LastVoiceEndTime   time.Time `json:"last_voice_end_time"`   //最后语音时间
-	LastVoiceDuration  int       `json:"last_voice_duration"`   //上次语音持续时长  秒
+	LastVoiceBeginTime time.Time `json:"last_voice_begin_time"` //上次语音开始时�?
+	LastVoiceEndTime   time.Time `json:"last_voice_end_time"`   //最后语音时�?
+	LastVoiceDuration  int       `json:"last_voice_duration"`   //上次语音持续时长  �?
 	Loged              bool
 
 	CtlTime          int       `json:"ctl_time"`            //通话时长
-	LastCtlBeginTime time.Time `json:"last_ctl_begin_time"` //上次控制开始时间
-	LastCtlEndTime   time.Time `json:"last_ctl_end_time"`   //最后控制时间
-	LastCtlDuration  int       `json:"last_ctl_duration"`   //上次控制持续时长  秒
+	LastCtlBeginTime time.Time `json:"last_ctl_begin_time"` //上次控制开始时�?
+	LastCtlEndTime   time.Time `json:"last_ctl_end_time"`   //最后控制时�?
+	LastCtlDuration  int       `json:"last_ctl_duration"`   //上次控制持续时长  �?
 
 	Note          string     `json:"note" db:"note"` //设备上线时间
 	DeviceParm    *control   `json:"device_parm"`
 	LastATcommand *ATcommand `json:"last_atcommand"`
-	pcmBuf        []byte     //g711语音缓存，发送端追加，混音端每次取160字节
+	pcmBuf        []byte     //g711语音缓存，发送端追加，混音端每次�?60字节
 	pcmMu         sync.Mutex
 	pcmBuffer     []int
 	speaking      bool
@@ -84,7 +84,7 @@ func (d *deviceInfo) sendHeartbear() {
 			_, err := d.udpSocket.WriteToUDP(packet, d.udpAddr)
 			if err != nil {
 				log.Println("send hb err:", err, d.udpAddr)
-				d.udpSocket = globelconn
+				d.udpSocket = globalConn
 			}
 			time.Sleep(time.Second * 2)
 
@@ -122,7 +122,7 @@ func checkdeviceOnline() {
 					continue
 				}
 
-				// 清理过期条目：设备地址已变化，旧key需要删除，不影响设备在线状态
+				// 清理过期条目：设备地址已变化，旧key需要删除，不影响设备在线状�?
 				if vvv.udpAddr != nil && kkk != vvv.udpAddr.String() {
 					delete(vv.connPool.devConnMap, kkk)
 					change = true
@@ -164,7 +164,7 @@ func checkdeviceOnline() {
 				vv.connPool.mu.Lock()
 				for kkk, vvv := range vv.connPool.devConnMap {
 
-					// 清理过期条目：设备地址已变化，旧key需要删除，不影响设备在线状态
+					// 清理过期条目：设备地址已变化，旧key需要删除，不影响设备在线状�?
 					if vvv.udpAddr != nil && kkk != vvv.udpAddr.String() {
 						delete(vv.connPool.devConnMap, kkk)
 						continue
@@ -195,7 +195,7 @@ func checkdeviceOnline() {
 		})
 
 		prevOnlineDeviceTotal := totalstats.OnlineDevNumber
-		onlinedevMap = onlineMap
+		onlineDevMapStore(onlineMap)
 		totalstats.OnlineDevNumber = onlineDeviceTotal
 		if prevOnlineDeviceTotal == 0 && onlineDeviceTotal > 0 {
 			go func() {
@@ -237,9 +237,9 @@ func initAllDevList() {
 	if err != nil {
 		log.Println("query all device list  err:", err)
 	}
+	defer rows.Close()
 
 	for rows.Next() {
-
 		dev := &deviceInfo{}
 		err := rows.Scan(&dev.ID, &dev.Name, &dev.CallSign, &dev.SSID, &dev.Priority, &dev.DMRID, &dev.Password, &dev.Gird, &dev.DevType, &dev.DevModel,
 			&dev.GroupID, &dev.Status, &dev.ISCerted, &dev.ChanName,
@@ -257,7 +257,7 @@ func initAllDevList() {
 			dev.GroupID = 999
 		}
 
-		devCallsignSSIDMap[callsignSSID] = dev
+		devMapStore(callsignSSID, dev)
 
 		if kk, ok := publicGroupMap[dev.GroupID]; ok {
 
@@ -307,11 +307,11 @@ func (d *deviceInfo) String() string {
 
 }
 
-func getDevicelist(w string, p string, sort string) ([]*deviceInfo, int) {
+func getDevicelist(w string, args []interface{}, p string, sort string) ([]*deviceInfo, int) {
 
 	devlist := []*deviceInfo{}
 
-	query := fmt.Sprintf(`	select 
+	query := fmt.Sprintf(`	select
 	id,
 	name,
 	callsign,
@@ -330,18 +330,15 @@ func getDevicelist(w string, p string, sort string) ([]*deviceInfo, int) {
 	update_time,
 	online_time,
 	note,
-	rf_type  
+	rf_type
  from  devices  %v  %v  %v  `, w, sort, p)
 
-	//fmt.Println(query)
-
-	rows, err := db.Query(query)
-
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		log.Println("查询设备列表错误: ", err, "\n", query)
 		return nil, 0
-
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 
@@ -368,8 +365,7 @@ func getDevicelist(w string, p string, sort string) ([]*deviceInfo, int) {
 
 	var t int
 	q := fmt.Sprintf(`SELECT count(*) as total FROM devices  %v  `, w)
-	//fmt.Println(q)
-	row := db.QueryRow(q)
+	row := db.QueryRow(q, args...)
 	err = row.Scan(&t)
 	if err != nil {
 		log.Println(" 查询用户列表total错误 err:", err, t)
@@ -391,7 +387,7 @@ func getOnlineDevicelist(limit, page int, callsign string, groupid string, sorts
 
 	callsign = strings.ToUpper(callsign)
 
-	for k, v := range onlinedevMap {
+	for _, v := range onlineDevMapSnapshot() {
 
 		match := true
 		yes, _ := regexp.MatchString(callsign, v.CallSign)
@@ -407,7 +403,7 @@ func getOnlineDevicelist(limit, page int, callsign string, groupid string, sorts
 		}
 
 		if match {
-			devlist = append(devlist, onlinedevMap[k])
+			devlist = append(devlist, v)
 		}
 
 	}
@@ -427,7 +423,7 @@ func getOnlineDevicelist(limit, page int, callsign string, groupid string, sorts
 }
 
 func getDeviceFromMap(callsignssid string) (dev *deviceInfo) {
-	if d, ok := devCallsignSSIDMap[callsignssid]; ok {
+	if d, ok := devMapLoad(callsignssid); ok {
 		return d
 	}
 	return nil
@@ -490,9 +486,9 @@ func getDeviceByDMRID(dmrid string) (dev *deviceInfo) {
 
 func queryDeviceParm(callsignwithssid string) (dev *deviceInfo, err error) {
 
-	if dev, ok := devCallsignSSIDMap[callsignwithssid]; ok {
+	if dev, ok := devMapLoad(callsignwithssid); ok {
 
-		globelconn.WriteToUDP(encodeNRL21(dev.CallSign, dev.SSID, 3, 0, 0, []byte{0x01}), dev.udpAddr)
+		globalConn.WriteToUDP(encodeNRL21(dev.CallSign, dev.SSID, 3, 0, 0, []byte{0x01}), dev.udpAddr)
 
 		time.Sleep(300 * time.Millisecond)
 
@@ -508,12 +504,12 @@ func changeDeviceByteParm(callsignssid string, offset int, str string) (res []by
 
 	val, _ := strconv.Atoi(str)
 
-	if d, ok := devCallsignSSIDMap[callsignssid]; ok {
+	if d, ok := devMapLoad(callsignssid); ok {
 
 		d.DeviceParm.data[offset] = byte(val)
 		newpacket := encodeNRL21(d.CallSign, d.SSID, 3, 0, 0, []byte{0x03})
 		newpacket = append(newpacket, d.DeviceParm.data...)
-		globelconn.WriteToUDP(newpacket, d.udpAddr)
+		globalConn.WriteToUDP(newpacket, d.udpAddr)
 		time.Sleep(200 * time.Millisecond)
 
 		rescode, _ := jsonextra.Marshal(d)
@@ -536,7 +532,7 @@ func changeDeviceCallsignSSIDParm(callsignssid string, newcallsignssid string) (
 		return nil, errors.New("callsign or ssid error")
 	}
 
-	if d, ok := devCallsignSSIDMap[callsignssid]; ok {
+	if d, ok := devMapLoad(callsignssid); ok {
 
 		d.DeviceParm.data[64] = byte(ssid)
 		copy(d.DeviceParm.data[65:71], callsign)
@@ -548,7 +544,7 @@ func changeDeviceCallsignSSIDParm(callsignssid string, newcallsignssid string) (
 		}
 		newpacket := encodeNRL21(d.CallSign, d.SSID, 3, 0, 0, []byte{0x03})
 		newpacket = append(newpacket, d.DeviceParm.data...)
-		globelconn.WriteToUDP(newpacket, d.udpAddr)
+		globalConn.WriteToUDP(newpacket, d.udpAddr)
 		time.Sleep(200 * time.Millisecond)
 
 		rescode, _ := jsonextra.Marshal(d)
@@ -611,7 +607,7 @@ func changeDeviceIPParm(callsignssid string, ip ipparm) (res []byte, err error) 
 		return nil, errors.New("ip format error")
 	}
 
-	if d, ok := devCallsignSSIDMap[callsignssid]; ok {
+	if d, ok := devMapLoad(callsignssid); ok {
 
 		for _, v := range lip {
 			d.DeviceParm.data[ip.localIPOffset] = v
@@ -641,7 +637,7 @@ func changeDeviceIPParm(callsignssid string, ip ipparm) (res []byte, err error) 
 
 		newpacket := encodeNRL21(d.CallSign, d.SSID, 3, 0, 0, []byte{0x03})
 		newpacket = append(newpacket, d.DeviceParm.data...)
-		globelconn.WriteToUDP(newpacket, d.udpAddr)
+		globalConn.WriteToUDP(newpacket, d.udpAddr)
 		time.Sleep(200 * time.Millisecond)
 
 		rescode, _ := jsonextra.Marshal(d)
@@ -655,13 +651,13 @@ func changeDeviceIPParm(callsignssid string, ip ipparm) (res []byte, err error) 
 
 func DeviceAT(at *ATcommand) (dev *deviceInfo, err error) {
 
-	if d, ok := devCallsignSSIDMap[getCallsignSSID(at.CallSign, at.SSID)]; ok {
+	if d, ok := devMapLoad(getCallsignSSID(at.CallSign, at.SSID)); ok {
 
 		atcommand := append([]byte{0x01}, []byte(at.String())...)
 
 		packet := encodeNRL21(at.CallSign, at.SSID, 11, 11, d.DMRID, []byte(atcommand))
 
-		globelconn.WriteToUDP(packet, d.udpAddr)
+		globalConn.WriteToUDP(packet, d.udpAddr)
 
 		return d, nil
 
@@ -675,14 +671,14 @@ func changeDeviceUint16Parm(callsignssid string, offset int, str string) (res []
 
 	val, _ := strconv.Atoi(str)
 
-	if d, ok := devCallsignSSIDMap[callsignssid]; ok {
+	if d, ok := devMapLoad(callsignssid); ok {
 
 		d.DeviceParm.data[offset+1] = byte(val & 0xFF)
 		d.DeviceParm.data[offset] = byte(val >> 8)
 
 		newpacket := encodeNRL21(d.CallSign, d.SSID, 3, 0, 0, []byte{0x03})
 		newpacket = append(newpacket, d.DeviceParm.data...)
-		globelconn.WriteToUDP(newpacket, d.udpAddr)
+		globalConn.WriteToUDP(newpacket, d.udpAddr)
 		time.Sleep(200 * time.Millisecond)
 
 		rescode, _ := jsonextra.Marshal(d)
@@ -696,7 +692,7 @@ func changeDeviceUint16Parm(callsignssid string, offset int, str string) (res []
 
 func changeDevice1W(ctr *control) (res []byte, err error) {
 
-	if d, ok := devCallsignSSIDMap[getCallsignSSID(ctr.CallSign, ctr.SSID)]; ok {
+	if d, ok := devMapLoad(getCallsignSSID(ctr.CallSign, ctr.SSID)); ok {
 
 		oneParm := bytes.Split(bytes.Split(d.DeviceParm.data[128:160], []byte{0x00})[0], []byte{','})
 		if len(oneParm) < 6 {
@@ -708,7 +704,7 @@ func changeDevice1W(ctr *control) (res []byte, err error) {
 		oneParm[3] = []byte(ctr.OneReciveCXCSS)
 		oneParm[4] = []byte(strconv.Itoa(ctr.OneSQLLevel))
 		oneParm[5] = []byte(ctr.OneTransmitCXCSS)
-		//oneParm[6] = []byte{'0'}  //无需修改，使用原始的fLAG值
+		//oneParm[6] = []byte{'0'}  //无需修改，使用原始的fLAG�?
 
 		p := bytes.Join(oneParm, []byte{','})
 		p = append(p, 0x00)
@@ -723,7 +719,7 @@ func changeDevice1W(ctr *control) (res []byte, err error) {
 		d.DeviceParm.data[161] = []byte(strconv.Itoa(ctr.OneMICSensitivity))[0]
 
 		newpacket := append(encodeNRL21(d.CallSign, d.SSID, 3, 0, 0, []byte{0x03}), d.DeviceParm.data...)
-		globelconn.WriteToUDP(newpacket, d.udpAddr)
+		globalConn.WriteToUDP(newpacket, d.udpAddr)
 		time.Sleep(200 * time.Millisecond)
 
 		rescode, _ := jsonextra.Marshal(d)
@@ -737,7 +733,7 @@ func changeDevice1W(ctr *control) (res []byte, err error) {
 
 func changeDevice2W(ctr *control) (res []byte, err error) {
 
-	if d, ok := devCallsignSSIDMap[getCallsignSSID(ctr.CallSign, ctr.SSID)]; ok {
+	if d, ok := devMapLoad(getCallsignSSID(ctr.CallSign, ctr.SSID)); ok {
 
 		//oneParm := bytes.Split(bytes.Split(d.DeviceParm.data[128:160], []byte{0x00})[0], []byte{','})
 
@@ -764,7 +760,7 @@ func changeDevice2W(ctr *control) (res []byte, err error) {
 
 		newpacket := encodeNRL21(d.CallSign, d.SSID, 3, 0, 0, []byte{0x03})
 		newpacket = append(newpacket, d.DeviceParm.data...)
-		globelconn.WriteToUDP(newpacket, d.udpAddr)
+		globalConn.WriteToUDP(newpacket, d.udpAddr)
 		time.Sleep(200 * time.Millisecond)
 
 		rescode, _ := jsonextra.Marshal(d)
@@ -816,7 +812,7 @@ func offlineDevice(dev string) {
 
 	log.Println("offlineDevice:", dev)
 
-	if d, ok := devCallsignSSIDMap[dev]; ok {
+	if d, ok := devMapLoad(dev); ok {
 
 		//delete(publicGroupMap[d.GroupID].connPool.devConnMap, d.udpAddr.String())
 		d.udpAddr = nil
@@ -839,8 +835,8 @@ func delDevice(dev *deviceInfo) error {
 		return err
 	}
 
-	if d, ok := devCallsignSSIDMap[dev.CallSignSSID]; ok {
-		delete(devCallsignSSIDMap, dev.CallSignSSID)
+	if d, ok := devMapLoad(dev.CallSignSSID); ok {
+		devMapDelete(dev.CallSignSSID)
 		delete(publicGroupMap[dev.GroupID].devMap, dev.ID)
 		if d.udpAddr != nil {
 			publicGroupMap[dev.GroupID].connPool.removeDevice(d.udpAddr.String())
@@ -861,7 +857,7 @@ func updateDevice(e *deviceInfo) error {
 		return err
 	}
 
-	if d, ok := devCallsignSSIDMap[getCallsignSSID(e.CallSign, e.SSID)]; ok {
+	if d, ok := devMapLoad(getCallsignSSID(e.CallSign, e.SSID)); ok {
 		d.Name = e.Name
 		d.Gird = e.Gird
 		d.DMRID = e.DMRID
@@ -878,11 +874,11 @@ func updateDevice(e *deviceInfo) error {
 
 			if d.DevModel == 255 {
 				d.GroupID = 999
-				return errors.New("255设备不能移出999组")
+				return errors.New("255设备不能移出999�?)
 			}
 
 			if d.DevModel == 200 && e.GroupID == 999 {
-				return errors.New("200设备不能加入255组")
+				return errors.New("200设备不能加入255�?)
 			}
 
 			_, err := changeDevGroup(d, e.GroupID)
@@ -899,7 +895,7 @@ func updateDevice(e *deviceInfo) error {
 
 func changeDeviceGroup(e *deviceInfo) error {
 
-	if d, ok := devCallsignSSIDMap[getCallsignSSID(e.CallSign, e.SSID)]; ok {
+	if d, ok := devMapLoad(getCallsignSSID(e.CallSign, e.SSID)); ok {
 
 		if d.GroupID != e.GroupID {
 			_, err := changeDevGroup(d, e.GroupID)

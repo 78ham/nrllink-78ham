@@ -94,7 +94,7 @@ func reportCurrentServerStatus() error {
 		Host:   strings.TrimSpace(conf.APRS.SelfAddress),
 		Port:   strings.TrimSpace(conf.APRS.SelfPort),
 		Online: currentOnlineDeviceCount(),
-		Total:  len(devCallsignSSIDMap),
+		Total:  devMapLen(),
 	}
 
 	if payload.Name == "" {

@@ -62,7 +62,7 @@ type totalStats struct {
 
 func (j *jsonapi) httpTotalStats(w http.ResponseWriter, req *http.Request) {
 
-	totalstats.DevNumber = len(devCallsignSSIDMap)
+	totalstats.DevNumber = devMapLen()
 	totalstats.OnlineDevNumber = currentOnlineDeviceCount()
 	totalstats.UserNumber = 1000
 	//totalstats.UserNumber = len(userlist)
@@ -103,11 +103,63 @@ func (j *jsonapi) httpplatformList(w http.ResponseWriter, req *http.Request) {
 }
 
 func sethttphead(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")             //允许访问所有域
-	w.Header().Add("Access-Control-Allow-Headers", "Content-Type") //header的类型
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Add("Access-Control-Allow-Headers", "Content-Type")
 	w.Header().Add("Access-Control-Allow-Headers", "x-token")
-	w.Header().Set("content-type", "application/json") //返回数据格式是json
+	w.Header().Set("content-type", "application/json")
+}
 
+func writeJSONResponseItems(w http.ResponseWriter, data interface{}, total int) {
+	rescode, err := jsonextra.Marshal(data)
+	if err != nil {
+		w.Write([]byte(`{"code":20001,"data":{"message":"JSON序列化失败"}}`))
+		return
+	}
+	var respone string
+	if total > 0 {
+		respone = fmt.Sprintf(`{"code":20000,"data":{"total":%v,"items":%s}}`, total, rescode)
+	} else {
+		respone = fmt.Sprintf(`{"code":20000,"data":{"items":%s}}`, rescode)
+	}
+	w.Write([]byte(respone))
+}
+
+func writeJSONResponseItem(w http.ResponseWriter, data interface{}) {
+	rescode, err := jsonextra.Marshal(data)
+	if err != nil {
+		w.Write([]byte(`{"code":20001,"data":{"message":"JSON序列化失败"}}`))
+		return
+	}
+	respone := fmt.Sprintf(`{"code":20000,"data":{"items":%s}}`, rescode)
+	w.Write([]byte(respone))
+}
+
+func writeJSONResponseMessage(w http.ResponseWriter, message string, code int) {
+	if code == 0 {
+		code = 20000
+	}
+	respone := fmt.Sprintf(`{"code":%d,"data":{"message":"%s"}}`, code, message)
+	w.Write([]byte(respone))
+}
+
+func writeJSONResponseError(w http.ResponseWriter, message string) {
+	writeJSONResponseMessage(w, message, 20001)
+}
+
+func writeJSONResponseOK(w http.ResponseWriter) {
+	writeJSONResponseMessage(w, "操作成功", 20000)
+}
+
+func writeJSONResponseParamError(w http.ResponseWriter) {
+	writeJSONResponseError(w, "参数错误")
+}
+
+func writeJSONResponseRightError(w http.ResponseWriter) {
+	writeJSONResponseError(w, "权限不足")
+}
+
+func writeJSONResponseOpError(w http.ResponseWriter) {
+	writeJSONResponseError(w, "操作失败")
 }
 
 func allowWebsocketHandshake(config *websocket.Config, req *http.Request) error {
@@ -307,234 +359,225 @@ type query struct {
 	Path          string   `json:"path"`
 }
 
-func queryToWhere(subquery string, q query) (string, string, string) {
+func queryToWhere(subquery string, q query) (string, []interface{}, string, string) {
 
 	var s string
+	var args []interface{}
 	var p string
 	var sort string
 
 	if q.ID != "" {
-		s = " id = " + q.ID
-	}
-
-	//自定义查询条件
-	if q.QueryString != "" {
-		if s != "" {
-			s = s + " and " + q.QueryString + ""
-		} else {
-			s = " " + q.QueryString + " "
-		}
+		s = " id = ?"
+		args = append(args, q.ID)
 	}
 
 	if q.OperatorID != "" {
 		if s != "" {
-			s = s + " and  operator_id=" + q.OperatorID
+			s = s + " and operator_id=?"
 		} else {
-			s = " operator_id=" + q.OperatorID
+			s = " operator_id=?"
 		}
+		args = append(args, q.OperatorID)
 	}
 
 	if q.CurrentArea != "" {
 		if s != "" {
-			s = s + " and " + subquery + "current_area=" + q.CurrentArea
+			s = s + " and " + subquery + "current_area=?"
 		} else {
-			s = " " + subquery + "current_area=" + q.CurrentArea
+			s = " " + subquery + "current_area=?"
 		}
+		args = append(args, q.CurrentArea)
 	}
 
 	if q.AreaID != "" {
 		if s != "" {
-			s = s + " and  areaid=" + q.AreaID
+			s = s + " and areaid=?"
 		} else {
-			s = " areaid=" + q.AreaID
+			s = " areaid=?"
 		}
-	}
-
-	if q.Area != "" {
-		if s != "" {
-			s = s + " and " + subquery + "area @> '{" + q.Area + "}'"
-		} else {
-			s = " " + subquery + "area @> '{" + q.Area + "}'"
-		}
+		args = append(args, q.AreaID)
 	}
 
 	if q.IsDeleted != "" {
 		if s != "" {
-			s = s + " and isdeleted=" + q.IsDeleted + ""
+			s = s + " and isdeleted=?"
 		} else {
-			s = " isdeleted=" + q.IsDeleted + ""
+			s = " isdeleted=?"
 		}
+		args = append(args, q.IsDeleted)
 	}
 
 	if q.Phone != "" {
 		if s != "" {
-			s = s + " and phone='" + q.Phone + "'"
+			s = s + " and phone=?"
 		} else {
-			s = " phone='" + q.Phone + "'"
+			s = " phone=?"
 		}
+		args = append(args, q.Phone)
 	}
 
 	if q.Callsign != "" {
-
 		q.Callsign = strings.ToUpper(q.Callsign)
-
 		if s != "" {
-			s = s + " and callsign='" + q.Callsign + "'"
+			s = s + " and callsign=?"
 		} else {
-			s = " callsign='" + q.Callsign + "'"
+			s = " callsign=?"
 		}
+		args = append(args, q.Callsign)
 	}
 
 	if q.GroupID != "" {
 		if s != "" {
-			s = s + " and group_id =" + q.GroupID + " "
+			s = s + " and group_id=?"
 		} else {
-			s = " group_id = " + q.GroupID + " "
+			s = " group_id=?"
 		}
-
+		args = append(args, q.GroupID)
 	}
 
 	if q.Role != "" {
 		if s != "" {
-			s = s + " and " + subquery + "roles like '%" + q.Role + "%'"
+			s = s + " and " + subquery + "roles like ?"
 		} else {
-			s = " " + subquery + "roles like '%" + q.Role + "%'"
+			s = " " + subquery + "roles like ?"
 		}
+		args = append(args, "%"+q.Role+"%")
 	}
 
 	if q.Date != "" {
 		if s != "" {
-			s = s + " and date='" + q.Date + "'"
+			s = s + " and date=?"
 		} else {
-			s = " date='" + q.Date + "'"
+			s = " date=?"
 		}
+		args = append(args, q.Date)
 	}
 
 	if q.Type != "" {
 		if s != "" {
-			s = s + "  and type=" + q.Type
+			s = s + " and type=?"
 		} else {
-			s = " type=" + q.Type
+			s = " type=?"
 		}
+		args = append(args, q.Type)
 	}
 
-	// if len(q.Status) > 0 {
-
-	// 	if s != "" {
-	// 		s = s + "  and status IN " + array2strings(q.Status)
-	// 	} else {
-	// 		s = " status IN " + array2strings(q.Status)
-	// 	}
-
-	// }
 	if q.Status != "" {
 		if s != "" {
-			s = s + "  and status=" + q.Status
+			s = s + " and status=?"
 		} else {
-			s = " status=" + q.Status
+			s = " status=?"
 		}
+		args = append(args, q.Status)
 	}
 
 	if q.NotStatus != "" {
 		if s != "" {
-			s = s + "  and status !=" + q.NotStatus
+			s = s + " and status!=?"
 		} else {
-			s = " status !=" + q.NotStatus
+			s = " status!=?"
 		}
+		args = append(args, q.NotStatus)
 	}
 
-	if q.Daterange != nil {
-
+	if q.Daterange != nil && len(q.Daterange) >= 2 {
 		if s != "" {
-			s = s + "  and timestamp between '" + q.Daterange[0] + "' and '" + q.Daterange[1] + " 23:59:59'"
-
+			s = s + " and timestamp between ? and ?"
 		} else {
-			s = "  timestamp between '" + q.Daterange[0] + "' and '" + q.Daterange[1] + " 23:59:59'"
+			s = " timestamp between ? and ?"
 		}
+		args = append(args, q.Daterange[0], q.Daterange[1]+" 23:59:59")
 	}
 
 	if q.Month != "" {
-
 		if s != "" {
-			s = s + "  and  timestamp =  '" + q.Month + "' "
-
+			s = s + " and timestamp=?"
 		} else {
-			s = "  timestamp =  '" + q.Month + "' "
+			s = " timestamp=?"
 		}
+		args = append(args, q.Month)
 	}
 
-	if q.UpdateTime != nil {
-
+	if q.UpdateTime != nil && len(q.UpdateTime) >= 2 {
 		if s != "" {
-			s = s + "  and update_time between '" + q.UpdateTime[0] + "' and '" + q.UpdateTime[1] + " 23:59:59'"
-
+			s = s + " and update_time between ? and ?"
 		} else {
-			s = "  update_time between '" + q.UpdateTime[0] + "' and '" + q.UpdateTime[1] + " 23:59:59'"
+			s = " update_time between ? and ?"
 		}
+		args = append(args, q.UpdateTime[0], q.UpdateTime[1]+" 23:59:59")
 	}
 
 	if q.Name != "" {
 		if s != "" {
-			s = s + " and (name like '%" + q.Name + "%' )"
+			s = s + " and (name like ?)"
 		} else {
-			s = " (name like '%" + q.Name + "%')"
+			s = " (name like ?)"
 		}
+		args = append(args, "%"+q.Name+"%")
 	}
 
 	if q.CountryName != "" {
 		if s != "" {
-			s = s + " and (country_name like '%" + q.CountryName + "%' )"
+			s = s + " and (country_name like ?)"
 		} else {
-			s = " (country_name like '%" + q.CountryName + "%')"
+			s = " (country_name like ?)"
 		}
+		args = append(args, "%"+q.CountryName+"%")
 	}
 
 	if q.RegionName != "" {
 		if s != "" {
-			s = s + " and (region_name like '%" + q.RegionName + "%' )"
+			s = s + " and (region_name like ?)"
 		} else {
-			s = " (region_name like '%" + q.RegionName + "%')"
+			s = " (region_name like ?)"
 		}
+		args = append(args, "%"+q.RegionName+"%")
 	}
 
 	if q.ISPDomain != "" {
 		if s != "" {
-			s = s + " and (isp_domain like '%" + q.ISPDomain + "%' )"
+			s = s + " and (isp_domain like ?)"
 		} else {
-			s = " (isp_domain like '%" + q.ISPDomain + "%')"
+			s = " (isp_domain like ?)"
 		}
+		args = append(args, "%"+q.ISPDomain+"%")
 	}
 
 	if q.IP != "" {
 		if s != "" {
-			s = s + " and (cidrip like '%" + q.IP + "%' )"
+			s = s + " and (cidrip like ?)"
 		} else {
-			s = " (cidrip like '%" + q.IP + "%')"
+			s = " (cidrip like ?)"
 		}
+		args = append(args, "%"+q.IP+"%")
 	}
 
 	if q.NamePhone != "" {
 		if s != "" {
-			s = s + " and (" + subquery + "name like '%" + q.NamePhone + "%' or " + subquery + "phone like '%" + q.NamePhone + "%')"
+			s = s + " and (" + subquery + "name like ? or " + subquery + "phone like ?)"
 		} else {
-			s = " (" + subquery + "name like '%" + q.NamePhone + "%' or " + subquery + "phone like '%" + q.NamePhone + "%')"
+			s = " (" + subquery + "name like ? or " + subquery + "phone like ?)"
 		}
+		likeVal := "%" + q.NamePhone + "%"
+		args = append(args, likeVal, likeVal)
 	}
 
 	if q.EventType != "" {
 		if s != "" {
-			s = s + " and (" + subquery + "event_type like '%" + q.EventType + "%' )"
+			s = s + " and (" + subquery + "event_type like ?)"
 		} else {
-			s = " (" + subquery + "event_type like '%" + q.EventType + "%' )"
+			s = " (" + subquery + "event_type like ?)"
 		}
+		args = append(args, "%"+q.EventType+"%")
 	}
 
 	if q.Schname != "" {
 		if s != "" {
-			s = s + " and schname='" + q.Schname + "'"
+			s = s + " and schname=?"
 		} else {
-			s = " schname='" + q.Schname + "'"
+			s = " schname=?"
 		}
+		args = append(args, q.Schname)
 	}
 
 	if s != "" {
@@ -542,7 +585,6 @@ func queryToWhere(subquery string, q query) (string, string, string) {
 	}
 
 	if q.Limit > 0 && q.Page > 0 {
-
 		p = fmt.Sprintf(" Limit %v offset %v", q.Limit, (q.Page-1)*q.Limit)
 	}
 
@@ -567,21 +609,8 @@ func queryToWhere(subquery string, q query) (string, string, string) {
 		sort = "order by follow_time asc , id asc "
 	case "-follow_time":
 		sort = "order by follow_time desc , id desc "
-
 	}
 
-	//	fmt.Println(s, p)
-	return s, p, sort
+	return s, args, p, sort
 
 }
-
-// func array2strings(status []int) (s string) {
-// 	s = "("
-
-// 	for _, v := range status {
-// 		s = s + strconv.Itoa(v) + ","
-// 	}
-// 	s = strings.TrimSuffix(s, ",") + ")"
-
-// 	return s
-// }

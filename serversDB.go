@@ -7,7 +7,7 @@ import (
 	"net"
 )
 
-//var ServersMap = make(map[int]*Server, 1000) //key 房间号
+//var ServersMap = make(map[int]*Server, 1000) //key 房间�?
 
 type Server struct {
 	ID         int    `json:"id" db:"id"`
@@ -18,19 +18,19 @@ type Server struct {
 	MemSize    int    `json:"mem_size" db:"mem_size"`
 	InputRate  int    `json:"input_rate" db:"input_rate"`
 	OuputRate  int    `json:"output_rate" db:"output_rate"`
-	Providers  string `json:"providers"`              //电信，联通，移动，其他
+	Providers  string `json:"providers"`              //电信，联通，移动，其�?
 	NetCard    string `json:"netcard" db:"netcard"`   //网卡
 	IPType     int    `json:"ip_type" db:"ip_type"`   //动态，静态，是否经过nat
-	IPAddr     string `json:"ip_addr" db:"ip_addr"`   //动态IP可以写0.0.0.0
+	IPAddr     string `json:"ip_addr" db:"ip_addr"`   //动态IP可以�?.0.0.0
 	UDPPort    string `json:"udp_port" db:"udp_port"` //服务端口
 	//UDPAddr    *net.UDPAddr
 	DNSName string `json:"dns_name" db:"dns_name"` //域名
 	//GroupList  []int  `json:"group_list" `            //服务器负责的群组列表
 	//DevMap       map[int]*deviceInfo `json:"devmap" `                          //key: 设备列表
-	//ISOnline     bool   `json:"is_online"`                        //服务器是否在线
+	//ISOnline     bool   `json:"is_online"`                        //服务器是否在�?
 	Status       int    `json:"status" db:"status"`               //1 启动  2 关闭
-	OwerID       int    `json:"ower_id" db:"ower_id"`             //谁的服务器
-	OwerCallsign string `json:"ower_callsign" db:"ower_callsign"` //服务器所有者呼号
+	OwerID       int    `json:"ower_id" db:"ower_id"`             //谁的服务�?
+	OwerCallsign string `json:"ower_callsign" db:"ower_callsign"` //服务器所有者呼�?
 	CreateTime   string `json:"create_time" db:"create_time"`
 	UpdateTime   string `json:"update_time" db:"update_time"`
 	//udpSocket    *net.UDPConn
@@ -44,7 +44,7 @@ func (p *Server) String() string {
 }
 
 func (p *Server) Start() error {
-	//创建到服务器的连接
+	//创建到服务器的连�?
 	addr, err := net.ResolveUDPAddr("udp", p.IPAddr+":"+p.UDPPort)
 	if err != nil {
 		log.Printf("Failed to resolve UDP address for server %d: %v", p.ID, err)
@@ -53,14 +53,14 @@ func (p *Server) Start() error {
 
 	log.Printf("UDP connection established for server %d to %s", p.ID, addr)
 
-	if dev, ok := devCallsignSSIDMap[p.OwerCallsign+"-200"]; ok {
+	if dev, ok := devMapLoad(p.OwerCallsign + "-200"); ok {
 
 		if dev.ISOnline {
 			log.Println("device Already started:", p.OwerCallsign, 200)
 			return nil
 		}
 
-		dev.udpSocket = globelconn
+		dev.udpSocket = globalConn
 		dev.udpAddr = addr
 
 		//dev.ISOnline = true
@@ -89,7 +89,7 @@ func (p *Server) Start() error {
 		dev = &deviceInfo{
 			Name:      p.IPAddr + ":" + p.UDPPort,
 			CallSign:  p.OwerCallsign,
-			udpSocket: globelconn,
+			udpSocket: globalConn,
 			udpAddr:   addr,
 			SSID:      200,
 			Priority:  100,
@@ -112,12 +112,12 @@ func (p *Server) Start() error {
 			return fmt.Errorf("get device error")
 		}
 
-		dev.udpSocket = globelconn
+		dev.udpSocket = globalConn
 		dev.udpAddr = addr
 		dev.DevModel = 200
 		//dev.ISOnline = true
 
-		devCallsignSSIDMap[p.OwerCallsign+"-200"] = dev
+		devMapStore(p.OwerCallsign+"-200", dev)
 
 		if p, ok := publicGroupMap[0]; ok {
 
@@ -137,7 +137,7 @@ func (p *Server) Start() error {
 
 func (p *Server) Stop() {
 
-	if dev, ok := devCallsignSSIDMap[p.OwerCallsign+"-200"]; ok {
+	if dev, ok := devMapLoad(p.OwerCallsign + "-200"); ok {
 
 		dev.udpSocket = nil
 
@@ -153,7 +153,7 @@ func (p *Server) Stop() {
 		fmt.Println("stop server hearbeard:", p.OwerCallsign, 200)
 
 	} else {
-		fmt.Println("stop server hearbeard err: server not start :", p.OwerCallsign, 200)
+		log.Println("stop server heartbeat err: server not start :", p.OwerCallsign, 200)
 	}
 
 	//断开到服务器的udp连接
@@ -291,13 +291,13 @@ func GetServer(id int) (server *Server) {
 
 // func addDevToServer(dev *deviceInfo, Serversid int) (err error) {
 
-// 	//从之前的服务器
+// 	//从之前的服务�?
 
 // 	if g, ok := ServersMap[dev.ID]; ok {
 // 		delete(g.DevMap, dev.ID)
 // 	}
 
-// 	//加入新的服务器
+// 	//加入新的服务�?
 
 // 	if g, ok := ServersMap[dev.ID]; ok {
 // 		dev.ID = Serversid
@@ -322,7 +322,7 @@ func GetServer(id int) (server *Server) {
 
 // func (u *userinfo) addGroupToServer(dev *deviceInfo, roomid int) (err error) {
 
-// 	//加入新的组
+// 	//加入新的�?
 
 // 	if g, ok := u.DevList[dev.ID]; ok {
 

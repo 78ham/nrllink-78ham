@@ -147,7 +147,7 @@ func currentOnlineDeviceCount() int {
 	if totalstats.OnlineDevNumber > 0 {
 		return totalstats.OnlineDevNumber
 	}
-	return len(onlinedevMap)
+	return onlineDevMapLen()
 }
 
 func (h *wsCallHub) broadcastStats() {
