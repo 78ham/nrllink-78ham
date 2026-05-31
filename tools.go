@@ -40,14 +40,6 @@ func writeJSONResponse(w http.ResponseWriter, res *Response) error {
 
 }
 
-func writeJSONResponseItems(w http.ResponseWriter, list interface{}, total int) error {
-	return writeJSONResponse(w, &Response{20000, "ok", respData{total, list}})
-}
-
-func writeJSONResponseItem(w http.ResponseWriter, item interface{}) error {
-	return writeJSONResponse(w, &Response{20000, "ok", item})
-}
-
 func checkHttpRequestTokenAndRight(w http.ResponseWriter, req *http.Request, rolelist []string) (*userinfo, []byte) {
 	sethttphead(w)
 	token, err := ValidateToken(req.Header.Get("x-token"))
