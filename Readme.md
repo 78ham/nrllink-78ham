@@ -2,7 +2,7 @@
 
 NRL Link 是一个基于 Go 语言的 UDP 语音转发服务器，配合 NRL 系列硬件盒子（NRL2100/2200/2300/3188/2600等）和 Vue3 Web 前端，实现无线电设备（模拟中继、手台、公网台、手机App等）的跨地域互联互通。
 
-**模块名**: `udphub` | **Go版本**: 1.21+ | **许可证**: MIT
+**原作**: BH4RPN (BG4VKI) | **78ham 二次开发** | **模块名**: `udphub` | **Go版本**: 1.21+ | **许可证**: MIT
 
 ---
 
@@ -308,7 +308,13 @@ type config struct {
 | 9 | 0x09 | Server Voice | 服务器互联语音(后续版本废弃,合并到Type 1) |
 | 10 | 0x0A | Device Control 2 | 设备控制类型2 |
 | 11 | 0x0B | AT Passthrough | AT指令透传(查询/写入) |
-| 12 | 0x0C | COM Passthrough | COM口数据透传 |
+| 12 | 0x0C | Codec2 700C | Codec2 超低码率语音 (700 bps) |
+| 13 | 0x0D | Codec2 1300 | Codec2 超低码率语音 (1300 bps) |
+| 14 | 0x0E | Codec2 1600 | Codec2 超低码率语音 (1600 bps) |
+| 15 | 0x0F | Codec2 2400 | Codec2 超低码率语音 (2400 bps) |
+| 16 | 0x10 | Codec2 3200 | Codec2 超低码率语音 (3200 bps) |
+
+> 注: Type 12 在早期版本曾用作 COM 串口透传，后续版本已重新分配给 Codec2 700C。COM 透传功能迁移至更高 Type 值。
 
 ### 协议版本演进
 
@@ -358,6 +364,86 @@ NRL2 协议在开发过程中经历了以下关键变更：
 应用类型: VOIP
 复杂度:   10
 ```
+
+### Codec2 超低码率语音 (Type 12-16)
+
+Codec2 是专为业余无线电数字语音设计的开源声码器，码率极低（700-3200 bps），可在极窄带宽信道（如短波 SSB、APRS 链路、LoRa 等）上传输清晰语音。
+
+**NRL2 Type 分配**:
+
+| Type | Codec2 模式 | 语音码率 | 每帧字节数 | 每帧PCM样本 | 帧时长 | 典型应用 |
+|------|------------|---------|-----------|------------|--------|---------|
+| 12 | 700C | 700 bps | 9 | 320 | 40ms | 短波/极窄带/远距离HF |
+| 13 | 1300 | 1300 bps | 8 | 320 | 40ms | 窄带VHF/数传链路 |
+| 14 | 1600 | 1600 bps | 8 | 320 | 40ms | 替代DMR/D-STAR窄带 |
+| 15 | 2400 | 2400 bps | 6 | 160 | 20ms | 标准数字语音质量 |
+| 16 | 3200 | 3200 bps | 8 | 160 | 20ms | 接近G.711质量 |
+
+```
+规格:
+  编码格式: Codec2 (基于正弦模型)
+  采样率:   8kHz
+  声道数:   1 (单声道)
+  帧时长:   20ms (2400/3200) / 40ms (700C/1300/1600)
+  库依赖:   libcodec2 (CGo 原生 / Emscripten WASM)
+```
+
+**带宽对比**:
+
+| 编码 | 码率 | 相对带宽 | 延时 |
+|------|------|---------|------|
+| G.711 | 64,000 bps | 100% | 20ms |
+| Opus | 32,000 bps | 50% | 20ms |
+| Codec2 3200 | 3,200 bps | 5% | 20ms |
+| Codec2 2400 | 2,400 bps | 3.8% | 20ms |
+| Codec2 1600 | 1,600 bps | 2.5% | 40ms |
+| Codec2 1300 | 1,300 bps | 2.0% | 40ms |
+| Codec2 700C | 700 bps | 1.1% | 40ms |
+
+### 编解码架构 (VoiceCodec 接口)
+
+服务端使用统一的 `VoiceCodec` 接口抽象所有语音编码，消除散落在各处的 `alaw2linear` 硬编码：
+
+```go
+type VoiceCodec interface {
+    Type() byte                          // NRL2 Type 值
+    DecodeToPCM(frame []byte) ([]int16, error)  // 解码为线性 PCM
+    EncodeFromPCM(pcm []int16) ([]byte, error)  // PCM 编码为语音帧
+    SampleRate() int                     // 采样率
+    FrameSamples() int                   // 每帧 PCM 样本数
+}
+```
+
+**CodecCaps 能力位图**:
+
+```go
+const (
+    CodecCapG711   byte = 1 << 0  // G.711 A-law
+    CodecCapOpus   byte = 1 << 1  // Opus 16kHz
+    CodecCapCodec2 byte = 1 << 2  // Codec2 全系列
+)
+```
+
+设备通过 NRL2 报文扩展字段 `SupportedCodecs` 位图宣告自身支持的编码能力，服务器根据目标设备的 CodecCaps 自动决策是否需要转码。
+
+### 跨编码转码 (transcode.go)
+
+当不同编码的设备在同一群组内通联时，服务器自动执行转码：
+
+```
+发送端语音帧 → 解码(VoiceCodec.DecodeToPCM) → 线性PCM
+    → 重采样(ResamplePCM, 如需) → 编码(VoiceCodec.EncodeFromPCM) → 接收端语音帧
+```
+
+**转码矩阵**:
+
+| 发送端 ↓ / 接收端 → | G.711 | Opus | Codec2 |
+|---------------------|-------|------|--------|
+| G.711 | 直通 | 8k→16k 重采样 | 8k保持, PCM→Codec2 |
+| Opus | 16k→8k 重采样 | 直通 | 16k→8k 重采样 |
+| Codec2 | PCM→G.711 | 8k→16k 重采样 | 同模式直通/异模式重编 |
+
+**Intra-frame 缓存**: 同一帧数据的同 src→dst 转码只执行一次，后续接收者复用缓存结果，每帧结束时清空。
 
 ---
 
