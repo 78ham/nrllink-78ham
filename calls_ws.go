@@ -144,8 +144,9 @@ func (h *wsCallHub) totalSubscriptions() int {
 }
 
 func currentOnlineDeviceCount() int {
-	if totalstats.OnlineDevNumber > 0 {
-		return totalstats.OnlineDevNumber
+	n := getTotalStatsOnlineDev()
+	if n > 0 {
+		return n
 	}
 	return onlineDevMapLen()
 }

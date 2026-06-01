@@ -288,7 +288,7 @@ func getEmpListByRole(role string) ([]userinfo, int) {
 	 where  roles like ?  ORDER BY id ASC`, rolePattern)
 
 	if err != nil {
-		log.Println("按角色查询用户列表错误: ", err, '\n', query)
+		log.Println("按角色查询用户列表错误: ", err, '\n', rolePattern)
 		return nil, 0
 
 	}
@@ -302,7 +302,7 @@ func getEmpListByRole(role string) ([]userinfo, int) {
 			&roles, &r.Introduction, &r.AlarmMsg, &r.Status, &r.UpdateTime, &r.LastLoginTime, &r.LoginErrTimes,
 			&r.CreateTime, &r.OpenID, &r.NickName, &r.PID, &r.LastLoginIP, &r.ExpireTime)
 		if err != nil {
-			log.Println("getuser by username err :", err, "\n", query)
+			log.Println("getuser by username err :", err, "\n", rolePattern)
 			continue
 		}
 		r.Roles = strings.Split(roles, ",")

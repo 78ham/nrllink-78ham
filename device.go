@@ -109,7 +109,7 @@ func (j *jsonapi) httpDeviceList(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	totalstats.OnlineDevNumber = onlineDeviceTotal
+	setTotalStatsOnlineDev(onlineDeviceTotal)
 
 	rescode, _ := jsonextra.Marshal(devicelist)
 
