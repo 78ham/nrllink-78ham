@@ -45,6 +45,7 @@ const lastCodec = ref('')
 const speakerList = ref<string[]>([])
 
 let ws: WebSocket | null = null
+let reconnectTimer: number | null = null
 let audioBufferQueue: ArrayBuffer[] = []
 let isPlaying = false
 
@@ -97,7 +98,8 @@ function connectWS() {
 
   ws.onclose = () => {
     lastCodec.value = ''
-    setTimeout(connectWS, 3000)
+    if (ws === null) return // 组件已卸载
+    reconnectTimer = window.setTimeout(connectWS, 3000)
   }
 }
 
@@ -149,6 +151,8 @@ function stopPTT() {
 onMounted(connectWS)
 onUnmounted(() => {
   ws?.close()
+  ws = null // 防止 reconnect 重连
+  if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
   audioBufferQueue = []
 })
 </script>

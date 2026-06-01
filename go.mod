@@ -7,10 +7,12 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/ipipdotnet/ipdb-go v1.3.3
 	github.com/json-iterator/go v1.1.12
+	github.com/lib/pq v1.10.9
 	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/sashabaranov/go-openai v1.41.2
 	golang.org/x/crypto v0.47.0
 	golang.org/x/net v0.49.0
+	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
 	gopkg.in/yaml.v3 v3.0.1
 )
 

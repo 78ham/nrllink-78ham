@@ -69,10 +69,17 @@ func (j *jsonapi) httpRegisterImage(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// 验证图片路径合法性
-	absPath, err := filepath.Abs(stb.Path) // 转换为绝对路径
+	// 验证图片路径合法性：仅允许读取执照目录下的文件
+	absPath, err := filepath.Abs(stb.Path)
 	if err != nil {
 		http.Error(w, "Invalid image path", http.StatusBadRequest)
+		return
+	}
+
+	allowedDir, _ := filepath.Abs(conf.System.LicensePath)
+	// 防止路径遍历：确保绝对路径在allowedDir下
+	if !strings.HasPrefix(absPath, allowedDir+string(os.PathSeparator)) && absPath != allowedDir {
+		http.Error(w, "Access denied", http.StatusForbidden)
 		return
 	}
 

@@ -6,7 +6,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, h } from 'vue'
 import { NDataTable, NTag } from 'naive-ui'
 import { useUserStore } from '../stores/user'
 

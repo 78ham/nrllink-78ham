@@ -100,20 +100,23 @@ async function decodeCodec2(data: Uint8Array, codecType: number): Promise<Int16A
   const samplesPerFrame = c2.codec2_samples_per_frame(mode)
   const bytesPerFrame = c2.codec2_bytes_per_frame(mode)
 
-  // 分配 WASM 内存
-  const pcmPtr = c2._malloc(samplesPerFrame * 2) // int16 = 2 bytes
+  // 如果数据包含多帧，解码所有帧并拼接
+  const frames = Math.floor(data.length / bytesPerFrame)
+  if (frames === 0) throw new Error(`Codec2 frame too short: ${data.length} < ${bytesPerFrame}`)
+
+  const totalSamples = frames * samplesPerFrame
+  const pcm = new Int16Array(totalSamples)
+
+  const pcmPtr = c2._malloc(samplesPerFrame * 2)
   const dataPtr = c2._malloc(bytesPerFrame)
 
   try {
-    // 复制编码数据到 WASM 内存
-    c2.HEAPU8.set(data.slice(0, bytesPerFrame), dataPtr)
-
-    // 解码
-    c2.codec2_decode(mode, pcmPtr, dataPtr)
-
-    // 读取 PCM 数据
-    const pcm = new Int16Array(samplesPerFrame)
-    pcm.set(c2.HEAP16.subarray(pcmPtr / 2, pcmPtr / 2 + samplesPerFrame))
+    for (let i = 0; i < frames; i++) {
+      const offset = i * bytesPerFrame
+      c2.HEAPU8.set(data.slice(offset, offset + bytesPerFrame), dataPtr)
+      c2.codec2_decode(mode, pcmPtr, dataPtr)
+      pcm.set(c2.HEAP16.subarray(pcmPtr / 2, pcmPtr / 2 + samplesPerFrame), i * samplesPerFrame)
+    }
     return pcm
   } finally {
     c2._free(pcmPtr)

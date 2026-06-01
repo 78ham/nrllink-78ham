@@ -34,18 +34,12 @@ func getRoutes() *routes {
 
 }
 
-func setRoutes(route string) {
-
-	r := &routes{}
-
-	query := fmt.Sprintf("update  routes  set routes=%v", route)
-
-	row := db.QueryRow(query)
-	err := row.Scan(r)
+func setRoutes(route string) error {
+	_, err := db.Exec("UPDATE routes SET routes=?", route)
 	if err != nil {
-		log.Println("save routes err:", err, r)
+		log.Println("save routes err:", err)
 	}
-
+	return err
 }
 
 func (j *jsonapi) httpGetRoutes(w http.ResponseWriter, req *http.Request) {

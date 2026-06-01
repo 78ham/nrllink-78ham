@@ -7,6 +7,7 @@ const routes: RouteRecordRaw[] = [
     path: '/',
     component: () => import('./views/Layout.vue'),
     redirect: '/dashboard',
+    meta: { requiresAuth: true },
     children: [
       { path: 'dashboard', name: 'Dashboard', component: () => import('./views/Dashboard.vue') },
       { path: 'devices', name: 'Devices', component: () => import('./views/DeviceList.vue') },
@@ -18,7 +19,19 @@ const routes: RouteRecordRaw[] = [
   { path: '/force-password', name: 'ForcePassword', component: () => import('./views/ForceChangePwd.vue') }
 ]
 
-export default createRouter({
+const router = createRouter({
   history: createWebHashHistory(),
   routes
 })
+
+router.beforeEach((to, _from, next) => {
+  if (to.matched.some(r => r.meta.requiresAuth)) {
+    const token = localStorage.getItem('token')
+    if (!token) {
+      return next({ name: 'Login', query: { redirect: to.fullPath } })
+    }
+  }
+  next()
+})
+
+export default router

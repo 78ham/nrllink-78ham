@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sync"
 )
 
 // VoiceCodec 是所有语音编码的统一接口。
@@ -41,7 +42,39 @@ const (
 	CodecCapCodec2 byte = 1 << 2
 )
 
-// NewCodec 根据 NRL2 Type 创建对应的编码实例。
+// codecPool 缓存已创建的编解码重实例，避免每帧重复创建（尤其是 Codec2/Opus 的 C 资源分配）。
+var (
+	codecPoolMu sync.Mutex
+	codecPool   = map[byte]VoiceCodec{}
+)
+
+// GetPooledCodec 返回池化或新创建的编解码器。
+// 对 G.711（无状态）共享单例；对 Codec2/Opus 每个 type 创建一次并复用。
+func GetPooledCodec(typeByte byte) (VoiceCodec, error) {
+	codecPoolMu.Lock()
+	if c, ok := codecPool[typeByte]; ok {
+		codecPoolMu.Unlock()
+		return c, nil
+	}
+	codecPoolMu.Unlock()
+
+	c, err := NewCodec(typeByte)
+	if err != nil {
+		return nil, err
+	}
+
+	codecPoolMu.Lock()
+	// 双检查：其他 goroutine 可能已创建
+	if existing, ok := codecPool[typeByte]; ok {
+		codecPoolMu.Unlock()
+		return existing, nil
+	}
+	codecPool[typeByte] = c
+	codecPoolMu.Unlock()
+	return c, nil
+}
+
+// NewCodec 根据 NRL2 Type 创建对应的编码实例（单次创建，热路径请用 GetPooledCodec）。
 func NewCodec(typeByte byte, mode ...int) (VoiceCodec, error) {
 	switch typeByte {
 	case CodecTypeG711:
@@ -63,18 +96,18 @@ func NewCodec(typeByte byte, mode ...int) (VoiceCodec, error) {
 	}
 }
 
-// DecodeToPCM 便捷函数：从编码类型和帧数据直接解码到 PCM
+// DecodeToPCM 便捷函数：从编码类型和帧数据直接解码到 PCM（使用池化编解码器）。
 func DecodeToPCM(typeByte byte, frame []byte) ([]int16, error) {
-	c, err := NewCodec(typeByte)
+	c, err := GetPooledCodec(typeByte)
 	if err != nil {
 		return nil, err
 	}
 	return c.DecodeToPCM(frame)
 }
 
-// EncodeFromPCM 便捷函数：从 PCM 和编码类型直接编码
+// EncodeFromPCM 便捷函数：从 PCM 和编码类型直接编码（使用池化编解码器）。
 func EncodeFromPCM(typeByte byte, pcm []int16) ([]byte, error) {
-	c, err := NewCodec(typeByte)
+	c, err := GetPooledCodec(typeByte)
 	if err != nil {
 		return nil, err
 	}

@@ -836,6 +836,11 @@ func forwardVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, gp *group) {
 				g711 := G711Encode(int16ToInt(pcm))
 				dev.pcmMu.Lock()
 				dev.pcmBuf = append(dev.pcmBuf, g711...)
+				// 防止pcmBuf无限增长导致OOM：最多保留5秒音频(8000Hz×5=40000字节)
+				const maxPcmBuf = 40000
+				if len(dev.pcmBuf) > maxPcmBuf {
+					dev.pcmBuf = dev.pcmBuf[len(dev.pcmBuf)-maxPcmBuf:]
+				}
 				dev.pcmMu.Unlock()
 			}
 			return
