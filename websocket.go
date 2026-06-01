@@ -3,27 +3,16 @@ package main
 import (
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/net/websocket"
 )
 
 var wsConnPoll = make(map[string]*websocket.Conn, 20)
-var wsConnPollMu sync.RWMutex
 
 func upper(ws *websocket.Conn) {
-	addr := ws.RemoteAddr().String()
 
-	wsConnPollMu.Lock()
-	wsConnPoll[addr] = ws
-	wsConnPollMu.Unlock()
-
-	defer func() {
-		wsConnPollMu.Lock()
-		delete(wsConnPoll, addr)
-		wsConnPollMu.Unlock()
-	}()
+	wsConnPoll[ws.RemoteAddr().String()] = ws
 
 	var err error
 	for {

@@ -81,7 +81,6 @@ type config struct {
 		PhoneCodeURL      string `yaml:"PhoneCodeURL" json:"phone_code_url"`
 		AvatarURL         string `yaml:"AvatarURL" json:"avatar_url"`
 		AccessToken       string
-		AccessKey         string `yaml:"AccessKey" json:"access_key"`
 		AppID             string `yaml:"AppID" json:"appid"`
 		AppSecret         string `yaml:"AppSecret" json:"appsecret"`
 		EncodingAESKey    string `yaml:"EncodingAESKey" json:"encodingaeskey"`
@@ -121,7 +120,16 @@ type config struct {
 		} `yaml:"WechatPay" json:"wechat_pay"`
 	} `yaml:"Billing" json:"billing"`
 
-	//points  int
+	Security struct {
+		MinPasswordLength  int `yaml:"MinPasswordLength" json:"min_password_length"`
+		MaxLoginAttempts   int `yaml:"MaxLoginAttempts" json:"max_login_attempts"`
+		LockoutDuration    int `yaml:"LockoutDuration" json:"lockout_duration"`
+		SessionTimeout     int `yaml:"SessionTimeout" json:"session_timeout"`
+	} `yaml:"Security" json:"security"`
+
+	Voice struct {
+		MixSampleRate int `yaml:"MixSampleRate" json:"mix_sample_rate"`
+	} `yaml:"Voice" json:"voice"`
 }
 
 var conf = &config{}
@@ -155,8 +163,7 @@ func (c *config) init() {
 	err = yaml.Unmarshal(yamlFile, conf)
 
 	if err != nil {
-		log.Printf("Unmarshal config error: %v", err)
-		os.Exit(1)
+		log.Fatalf("Unmarshal: %v \n %s", err, yamlFile)
 	}
 
 	// c.Parm.iDCfilterIPMap = make(map[uint32]bool, 0)
@@ -179,6 +186,21 @@ func (c *config) init() {
 
 	PlatformList = conf.PlatformList
 
+	if conf.Security.MinPasswordLength == 0 {
+		conf.Security.MinPasswordLength = 8
+	}
+	if conf.Security.MaxLoginAttempts == 0 {
+		conf.Security.MaxLoginAttempts = 10
+	}
+	if conf.Security.LockoutDuration == 0 {
+		conf.Security.LockoutDuration = 900
+	}
+	if conf.Security.SessionTimeout == 0 {
+		conf.Security.SessionTimeout = 86400
+	}
+	if conf.Voice.MixSampleRate == 0 {
+		conf.Voice.MixSampleRate = 16000
+	}
 }
 
 // Exist 判断文件存在

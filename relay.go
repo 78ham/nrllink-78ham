@@ -32,8 +32,8 @@ func (j *jsonapi) httpGetRelayList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	wh, _, p, sort := queryToWhere("", *stb)
-	list, total := selectrelay(wh, p, sort)
+	where, page, sort := queryToWhere("", *stb)
+	list, total := selectrelay(where, page, sort)
 
 	rescode, _ := jsonextra.Marshal(list)
 

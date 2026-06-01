@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"sync"
+
+	"github.com/lib/pq"
 )
 
 type deviceInfo struct {
@@ -43,8 +45,7 @@ type deviceInfo struct {
 	UpdateTime string         `json:"update_time" db:"update_time"` //信息更新时间
 	OnlineTime string         `json:"online_time" db:"online_time"` //设备上线时间
 	ISOnline   bool           `json:"is_online" `                   //当前是否在线
-	ChanName   []string `json:"chan_name" db:"chan_name"`     //射频信道名称
-	chanNameRaw string
+	ChanName   pq.StringArray `json:"chan_name" db:"chan_name"`     //射频信道名称
 
 	LastPacketTime  time.Time `json:"last_packet_time" ` //最后一次报文时�?
 	AccountExpired  bool      `json:"account_expired"`   //所属账号是否到�?
@@ -55,6 +56,9 @@ type deviceInfo struct {
 	LastVoiceEndTime   time.Time `json:"last_voice_end_time"`   //最后语音时�?
 	LastVoiceDuration  int       `json:"last_voice_duration"`   //上次语音持续时长  �?
 	Loged              bool
+
+	SupportedCodecs byte `json:"supported_codecs"` // 设备支持的编码能力位图
+	PreferredCodec  byte `json:"preferred_codec"`  // 设备首选编码类型
 
 	CtlTime          int       `json:"ctl_time"`            //通话时长
 	LastCtlBeginTime time.Time `json:"last_ctl_begin_time"` //上次控制开始时�?
@@ -109,7 +113,7 @@ func checkdeviceOnline() {
 		t := time.Now()
 		onlineDeviceTotal := 0
 
-		for _, vv := range getPublicGroupSnapshot() {
+		for _, vv := range publicGroupMap {
 
 			change := false
 			vv.OnlineDevNumber = 0
@@ -193,9 +197,9 @@ func checkdeviceOnline() {
 
 		})
 
-		prevOnlineDeviceTotal := getTotalStatsOnlineDev()
+		prevOnlineDeviceTotal := totalstats.OnlineDevNumber
 		onlineDevMapStore(onlineMap)
-		setTotalStatsOnlineDev(onlineDeviceTotal)
+		totalstats.OnlineDevNumber = onlineDeviceTotal
 		if prevOnlineDeviceTotal == 0 && onlineDeviceTotal > 0 {
 			go func() {
 				if err := reportCurrentServerStatus(); err != nil {
@@ -241,7 +245,7 @@ func initAllDevList() {
 	for rows.Next() {
 		dev := &deviceInfo{}
 		err := rows.Scan(&dev.ID, &dev.Name, &dev.CallSign, &dev.SSID, &dev.Priority, &dev.DMRID, &dev.Password, &dev.Gird, &dev.DevType, &dev.DevModel,
-			&dev.GroupID, &dev.Status, &dev.ISCerted, &dev.chanNameRaw,
+			&dev.GroupID, &dev.Status, &dev.ISCerted, &dev.ChanName,
 			&dev.CreateTime, &dev.UpdateTime, &dev.OnlineTime, &dev.Note, &dev.RFType)
 		if err != nil {
 			log.Println("query  all device rows err:", err)
@@ -249,9 +253,6 @@ func initAllDevList() {
 
 		callsignSSID := getCallsignSSID(dev.CallSign, dev.SSID)
 		dev.CallSignSSID = callsignSSID
-		if dev.chanNameRaw != "" {
-			dev.ChanName = strings.Split(dev.chanNameRaw, ";")
-		}
 
 		dev.pcmBuffer = make([]int, 1500)
 
@@ -261,7 +262,7 @@ func initAllDevList() {
 
 		devMapStore(callsignSSID, dev)
 
-		if kk, ok := getPublicGroup(dev.GroupID); ok {
+		if kk, ok := publicGroupMap[dev.GroupID]; ok {
 
 			kk.devMap[dev.ID] = dev
 			kk.DevList = append(kk.DevList, dev.ID)
@@ -272,7 +273,7 @@ func initAllDevList() {
 
 				dev.GroupID = 0
 
-				if kkk, ok := getPublicGroup(dev.GroupID); ok {
+				if kkk, ok := publicGroupMap[dev.GroupID]; ok {
 					kkk.devMap[dev.ID] = dev
 					kkk.DevList = append(kkk.DevList, dev.ID)
 
@@ -288,7 +289,7 @@ func initAllDevList() {
 
 					dev.GroupID = 0
 
-					if kkk, ok := getPublicGroup(dev.GroupID); ok {
+					if kkk, ok := publicGroupMap[dev.GroupID]; ok {
 						kkk.devMap[dev.ID] = dev
 						kkk.DevList = append(kkk.DevList, dev.ID)
 
@@ -347,14 +348,11 @@ func getDevicelist(w string, args []interface{}, p string, sort string) ([]*devi
 		dev := &deviceInfo{}
 
 		err := rows.Scan(&dev.ID, &dev.Name, &dev.CallSign, &dev.SSID, &dev.Priority, &dev.DMRID, &dev.Password, &dev.Gird, &dev.DevType, &dev.DevModel,
-			&dev.GroupID, &dev.Status, &dev.ISCerted, &dev.chanNameRaw,
+			&dev.GroupID, &dev.Status, &dev.ISCerted, &dev.ChanName,
 			&dev.CreateTime, &dev.UpdateTime, &dev.OnlineTime, &dev.Note, &dev.RFType)
 		if err != nil {
 			log.Println("getDevicelist err :", err, "\n", query)
 			continue
-		}
-		if dev.chanNameRaw != "" {
-			dev.ChanName = strings.Split(dev.chanNameRaw, ";")
 		}
 
 		d := getDeviceFromMap(getCallsignSSID(dev.CallSign, dev.SSID))
@@ -435,11 +433,6 @@ func getDeviceFromMap(callsignssid string) (dev *deviceInfo) {
 }
 
 func getDevice(callsign string, ssid byte) (dev *deviceInfo, err error) {
-	callsignSSID := getCallsignSSID(callsign, ssid)
-	if cached := getDeviceFromMap(callsignSSID); cached != nil {
-		return cached, nil
-	}
-
 	dev = &deviceInfo{}
 
 	row := db.QueryRow(`select id,name,callsign,
@@ -450,7 +443,7 @@ func getDevice(callsign string, ssid byte) (dev *deviceInfo, err error) {
  from  devices   where callsign=? and ssid=?`, callsign, ssid)
 
 	err = row.Scan(&dev.ID, &dev.Name, &dev.CallSign, &dev.SSID, &dev.Priority, &dev.DMRID, &dev.Password, &dev.Gird, &dev.DevType, &dev.DevModel,
-		&dev.GroupID, &dev.Status, &dev.ISCerted, &dev.chanNameRaw,
+		&dev.GroupID, &dev.Status, &dev.ISCerted, &dev.ChanName,
 		&dev.CreateTime, &dev.UpdateTime, &dev.OnlineTime, &dev.Note, &dev.RFType)
 
 	if err != nil {
@@ -460,9 +453,6 @@ func getDevice(callsign string, ssid byte) (dev *deviceInfo, err error) {
 
 	callsignSSID := getCallsignSSID(dev.CallSign, dev.SSID)
 	dev.CallSignSSID = callsignSSID
-	if dev.chanNameRaw != "" {
-		dev.ChanName = strings.Split(dev.chanNameRaw, ";")
-	}
 
 	return dev, nil
 
@@ -483,7 +473,7 @@ func getDeviceByDMRID(dmrid string) (dev *deviceInfo) {
  from  devices   where dmrid=? `, dmrid)
 
 	err := row.Scan(&dev.ID, &dev.Name, &dev.CallSign, &dev.SSID, &dev.DMRID, &dev.Password, &dev.Gird, &dev.DevType, &dev.DevModel,
-		&dev.GroupID, &dev.Status, &dev.ISCerted, &dev.chanNameRaw,
+		&dev.GroupID, &dev.Status, &dev.ISCerted, &dev.ChanName,
 		&dev.CreateTime, &dev.UpdateTime, &dev.OnlineTime, &dev.Note, &dev.RFType)
 
 	if err != nil {
@@ -492,9 +482,6 @@ func getDeviceByDMRID(dmrid string) (dev *deviceInfo) {
 
 	callsignSSID := getCallsignSSID(dev.CallSign, dev.SSID)
 	dev.CallSignSSID = callsignSSID
-	if dev.chanNameRaw != "" {
-		dev.ChanName = strings.Split(dev.chanNameRaw, ";")
-	}
 
 	return dev
 
@@ -813,7 +800,7 @@ func addDevice(dev *deviceInfo) error {
 	query := `INSERT INTO devices (	name,gird,dev_type,dev_model,status,group_id,callsign,ssid,dmrid,chan_name,note,password,rf_type,is_certed,online_time,create_time,update_time)
 		 VALUES ('','',0,?,0,?,?,?,?,?,'','',0,false,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`
 
-	_, err := db.Exec(query, dev.DevModel, dev.GroupID, dev.CallSign, strconv.Itoa(int(dev.SSID)), dev.DMRID, strings.Join(dev.ChanName, ";"))
+	_, err := db.Exec(query, dev.DevModel, dev.GroupID, dev.CallSign, strconv.Itoa(int(dev.SSID)), dev.DMRID, dev.ChanName)
 
 	if err != nil {
 		log.Println("add dev failed, ", err, '\n', query)
@@ -853,11 +840,9 @@ func delDevice(dev *deviceInfo) error {
 
 	if d, ok := devMapLoad(dev.CallSignSSID); ok {
 		devMapDelete(dev.CallSignSSID)
-		if g, gok := getPublicGroup(dev.GroupID); gok {
-			delete(g.devMap, dev.ID)
-			if d.udpAddr != nil {
-				g.connPool.removeDevice(d.udpAddr.String())
-			}
+		delete(publicGroupMap[dev.GroupID].devMap, dev.ID)
+		if d.udpAddr != nil {
+			publicGroupMap[dev.GroupID].connPool.removeDevice(d.udpAddr.String())
 		}
 	}
 
@@ -869,7 +854,7 @@ func updateDevice(e *deviceInfo) error {
 
 	_, err := db.Exec(`update devices set name=?, gird=?, dmrid=?, dev_type=?, dev_model=?, 	group_id=?,status=?,priority=?,
 	chan_name=?,rf_type=?,note=?,password=?,update_time=CURRENT_TIMESTAMP  where id=?`,
-		e.Name, e.Gird, e.DMRID, e.DevType, e.DevModel, e.GroupID, e.Status, e.Priority, strings.Join(e.ChanName, ";"), e.RFType, e.Note, e.Password, e.ID)
+		e.Name, e.Gird, e.DMRID, e.DevType, e.DevModel, e.GroupID, e.Status, e.Priority, e.ChanName, e.RFType, e.Note, e.Password, e.ID)
 	if err != nil {
 		log.Println("update device failed, ", err)
 		return err

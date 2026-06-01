@@ -123,8 +123,9 @@ type qth struct {
 }
 
 var (
+	QTHmapNew = make(map[string]qth) // callsign+ssid
+	QTHmap    = make(map[string]string)
 	qthMu     sync.RWMutex
-	platformListMu sync.RWMutex
 )
 
 func setQTH(callsignSSID, oldQTH string, newQTH qth) {
@@ -334,9 +335,7 @@ func udpProcess(conn *net.UDPConn) {
 			continue
 		}
 
-		totalstatsMu.Lock()
 		totalstats.PacketNumber++
-		totalstatsMu.Unlock()
 
 		callsignSSID := getCallsignSSID(nrl.CallSign, nrl.SSID)
 
@@ -350,9 +349,7 @@ func udpProcess(conn *net.UDPConn) {
 			//dev.udpAddr = nrl.UDPAddr
 			dev.LastPacketTime = nrl.timeStamp
 			dev.Traffic = dev.Traffic + 42 + 48 + len(nrl.DATA)
-			totalstatsMu.Lock()
 			totalstats.Traffic = totalstats.Traffic + 42 + 48 + len(nrl.DATA)
-			totalstatsMu.Unlock()
 
 			if nrl.DevModel != 200 {
 				NRL21SetDevDMRID(dev.DMRID, data[:n])
@@ -372,7 +369,8 @@ func udpProcess(conn *net.UDPConn) {
 
 			} else if dev.GroupID >= 999 || dev.GroupID == 0 {
 
-				if p, ok := getPublicGroup(dev.GroupID); ok {
+				//否则使用公共群组连接池
+				if p, ok := publicGroupMap[dev.GroupID]; ok {
 
 					NRL21parser(nrl, data[:n], dev, conn, p)
 				}
@@ -384,16 +382,28 @@ func udpProcess(conn *net.UDPConn) {
 		} else {
 
 			//设备不存在，加入设备,并加入加入缺省0公共群组,需要保存呼号callsign
+			codecCaps := nrl.CodecCaps
+			if codecCaps == 0 {
+				codecCaps = CodecCapG711 // 旧设备默认 G.711
+			}
+
+			// 根据配置的混音采样率计算 pcmBuffer 大小
+			mixRate := conf.Voice.MixSampleRate
+			if mixRate == 0 {
+				mixRate = 16000
+			}
+			pcmBufSize := mixRate * 20 / 1000 // 20ms 帧大小
+
 			dd := &deviceInfo{
 				CallSignSSID: callsignSSID,
 				CallSign:     nrl.CallSign,
 				SSID:         nrl.SSID,
-				//DMRID:        nrl.DMRID, // 过渡期，暂时不从nrl报文中获取DMRID，盒子不支持，当前从服务器配置中获取
-				DevModel: nrl.DevModel,
-				Priority: 100,
-				//udpAddr:      nrl.UDPAddr,
-				ChanName:  make([]string, 16),
-				pcmBuffer: make([]int, 160),
+				DevModel:     nrl.DevModel,
+				Priority:     100,
+				ChanName:     make([]string, 16),
+				pcmBuffer:    make([]int, pcmBufSize),
+				SupportedCodecs: codecCaps,
+				PreferredCodec:  nrl.CodecType,
 			}
 
 			if nrl.DevModel == 255 {
@@ -423,7 +433,7 @@ func udpProcess(conn *net.UDPConn) {
 				continue
 			}
 
-			if p, ok := getPublicGroup(d.GroupID); ok {
+			if p, ok := publicGroupMap[d.GroupID]; ok {
 
 				p.devMap[d.ID] = d
 
@@ -431,10 +441,9 @@ func udpProcess(conn *net.UDPConn) {
 
 			} else {
 
-				publicGroupMapMu.Lock()
 				publicGroupMap[0].devMap[d.ID] = d
+
 				NRL21parser(nrl, data[:n], d, conn, publicGroupMap[0])
-				publicGroupMapMu.Unlock()
 
 			}
 
@@ -454,8 +463,7 @@ func groupForDevice(dev *deviceInfo) *group {
 			return u.(*userinfo).Groups[dev.GroupID]
 		}
 	}
-	p, _ := getPublicGroup(dev.GroupID)
-	return p
+	return publicGroupMap[dev.GroupID]
 }
 
 func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDPConn, gp *group) {
@@ -465,9 +473,8 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 	case 0:
 		//控制指令，用户远程控制设备
 		fmt.Println("recived control commond ", nrl)
-	case 1, 8:
-		//1 语音消息，需要转发给群组内其它设备,
-		//fmt.Println("recived G.711 voice ")
+	case 1, 8, 12, 13, 14, 15, 16:
+		// 语音消息 (G.711/Opus/Codec2)，需要转发给群组内其它设备
 
 		//设备状态为禁发
 
@@ -479,7 +486,7 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 
 		if td > 200 {
 			dev.LastVoiceBeginTime = nrl.timeStamp
-			select { case logbuffer <- dev: default: }
+			logbuffer <- dev
 			dev.Loged = true
 			if nrl.DevModel == 200 || (nrl.DevModel == 255 && nrl.SSID == 255) {
 				callWSHub.trackCallStart(gp, nrl.OriginalCallsign, nrl.OriginalSSID, nrl.timeStamp)
@@ -494,9 +501,7 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 		dev.LastVoiceEndTime = nrl.timeStamp
 
 		dev.VoiceTime = dev.VoiceTime + 63
-		totalstatsMu.Lock()
 		totalstats.VoiceTime = totalstats.VoiceTime + 63
-		totalstatsMu.Unlock()
 
 		// if gp.connPool.allowCALLSSID != "" && gp.connPool.allowCALLSSID != dev.CallSignSSID {
 		// 	return
@@ -534,12 +539,17 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 
 		dev.udpAddr = nrl.UDPAddr
 
+		// 从心跳包提取设备编码能力
+		if nrl.CodecCaps != 0 {
+			dev.SupportedCodecs = nrl.CodecCaps
+		} else {
+			// 旧设备无能力字段，默认为仅 G.711
+			dev.SupportedCodecs = CodecCapG711
+		}
+
 		//心跳包，用于保存设备在线存活状态， 目前设备1s一次发送
 		if !dev.Loged && nrl.timeStamp.Sub(dev.LastVoiceEndTime).Milliseconds() > 200 {
-			select {
-			case select { case logbuffer <- dev: default: }:
-			default:
-			}
+			logbuffer <- dev
 			dev.Loged = true
 		}
 
@@ -669,7 +679,7 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 
 		if td > 200 {
 			dev.LastVoiceBeginTime = nrl.timeStamp
-			select { case logbuffer <- dev: default: }
+			logbuffer <- dev
 			dev.Loged = true
 			if nrl.DevModel == 200 || (nrl.DevModel == 255 && nrl.SSID == 255) {
 				callWSHub.trackCallStart(gp, nrl.OriginalCallsign, nrl.OriginalSSID, nrl.timeStamp)
@@ -684,9 +694,7 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 		dev.LastVoiceEndTime = nrl.timeStamp
 
 		dev.VoiceTime = dev.VoiceTime + 20
-		totalstatsMu.Lock()
 		totalstats.VoiceTime = totalstats.VoiceTime + 20
-		totalstatsMu.Unlock()
 
 		// if gp.connPool.allowCALLSSID != "" && gp.connPool.allowCALLSSID != dev.CallSignSSID {
 		// 	return
@@ -773,6 +781,12 @@ func forwardCOM(nrl *NRL21packet, packet []byte, gp *group) {
 
 func forwardVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, gp *group) {
 
+	// 确定本帧编码类型：优先从包头 CodecType 获取，回退到 Type 字段
+	srcCodecType := nrl.CodecType
+	if srcCodecType == 0 {
+		srcCodecType = nrl.Type
+	}
+
 	numbs := gp.connPool.count()
 
 	//房间类型为中继互联的时候，使用不允许出现双工
@@ -780,39 +794,32 @@ func forwardVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, gp *group) {
 		numbs = 3
 	}
 
-	//log.Println("PCMMIX: ", dev.CallSignSSID, "numbs", dev.GroupID, numbs, "type", gp.Type, "gp.ID", gp.ID, "gp.Name", gp.Name)
-
 	switch numbs {
 
 	case 0:
-		//log.Println("err connpoll is null")
 		return
 	case 1: //只有一个设备，缺省为环路测试，报文原样返回
 
-		//fmt.Println("case 1 :", clientAddrStr)
 		globelconn.WriteToUDP(packet, nrl.UDPAddr)
 		gp.connPool.setVoiceState(nrl.UDPAddr, nrl.timeStamp, dev.Priority)
-		callWSHub.publishVoiceFrame(gp, dev.CallSign, dev.SSID, nrl.DATA, nrl.timeStamp)
+		callWSHub.publishVoiceFrame(gp, dev.CallSign, dev.SSID, nrl.DATA, nrl.timeStamp, srcCodecType)
 
 	case 2: //如果有2个设备，缺省为全双工通信，报文转发给对方
-		callWSHub.publishVoiceFrame(gp, dev.CallSign, dev.SSID, nrl.DATA, nrl.timeStamp)
+		callWSHub.publishVoiceFrame(gp, dev.CallSign, dev.SSID, nrl.DATA, nrl.timeStamp, srcCodecType)
 
 		for _, vv := range gp.connPool.snapshotMap() {
 
-			//报文转发给其它设备，不包含自己
 			if vv.udpAddr != nil && nrl.UDPAddrStr != vv.udpAddr.String() && ((vv.Status & 2) != 2) {
-
-				//普通设备转发给其他200和255设备
 
 				if vv.DevModel == 200 && ((vv.Status & 4) != 4) {
 					newpacket := NRL21replace200and255dev(vv.CallSign, vv.SSID, nrl.Type, 200, nrl.CallSign, nrl.SSID, nrl.UDPAddr.IP.To4(), dev.DMRID, packet)
 					globelconn.WriteToUDP(newpacket, vv.udpAddr)
 
 				} else {
-					globelconn.WriteToUDP(packet, vv.udpAddr)
+					// 检查是否需要转码
+					sendPacketWithCodecCheck(packet, srcCodecType, vv, nrl.UDPAddrStr, nrl.timeStamp)
 				}
 			} else {
-				//更新自己的时间
 				vv.LastVoiceEndTime = nrl.timeStamp
 			}
 
@@ -820,22 +827,21 @@ func forwardVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, gp *group) {
 
 	default: //3个或3个以上设备，只允许一个设备发送语音，其它接收
 
-		//房间类型为会议室的时候，需要将语音进行混音，语音先放入缓存，等待其他设备的语音包
-		if gp.Type == 7 && nrl.Type == 1 {
-
-			// 直接追加到设备缓存，混音端按需取160字节
-			dev.pcmMu.Lock()
-			dev.pcmBuf = append(dev.pcmBuf, nrl.DATA...)
-			dev.pcmMu.Unlock()
+		//房间类型为会议室的时候，需要将语音进行混音
+		// 任意编码先解码到 PCM，再编码为 G.711 存入混音缓存
+		if gp.Type == 7 {
+			pcm, err := DecodeToPCM(srcCodecType, nrl.DATA)
+			if err == nil {
+				// 转 G.711 以兼容现有的 mixPCM 流程
+				g711 := G711Encode(int16ToInt(pcm))
+				dev.pcmMu.Lock()
+				dev.pcmBuf = append(dev.pcmBuf, g711...)
+				dev.pcmMu.Unlock()
+			}
 			return
 		}
 
-		// 抢话判定（方案 A：占用者宽限期）
-		// - 自己就是当前占用者：继续发言
-		// - 优先级高于占用者：立即抢占（保留高优先级抢话能力）
-		// - 否则：必须等占用者本人静默 >= 200ms 才能抢占
-		// 关键：判定使用的是"占用者本人最后一个包的时间"（lastOwnerPacketTime），
-		// 他人被丢弃的包不会刷新这个时间，避免双方相互打断造成的交替抢话。
+		// 抢话判定
 		lastUDPAddr, lastOwnerTime, lastPriority := gp.connPool.voiceOwnerState()
 		lastAddrStr := ""
 		if lastUDPAddr != nil {
@@ -847,53 +853,68 @@ func forwardVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, gp *group) {
 		ownerSilent := nrl.timeStamp.Sub(lastOwnerTime) >= 200*time.Millisecond
 
 		if !isOwner && !higherPriority && !ownerSilent {
-			// 占用者还在持续说话且自己优先级不够，丢弃本包
 			dev.LastVoiceEndTime = nrl.timeStamp
 			return
 		}
 
-		// 自己抢到/继续发言权，刷新占用状态
 		gp.connPool.setVoiceState(nrl.UDPAddr, nrl.timeStamp, dev.Priority)
-		callWSHub.publishVoiceFrame(gp, dev.CallSign, dev.SSID, nrl.DATA, nrl.timeStamp)
+		callWSHub.publishVoiceFrame(gp, dev.CallSign, dev.SSID, nrl.DATA, nrl.timeStamp, srcCodecType)
 
 		for _, vv := range gp.connPool.snapshotList() {
-			// if nrl.timeStamp.Sub(vv.lastTime) > 10*time.Second {
-			// 	log.Println("device timeout offline:", nrl.CallSign, "-", nrl.SSID, " ", kk)
-			// 	delete(gp.connPool.devConnMap, kk)
-			// 	continue
-			// }
 
 			if vv.udpAddr != nil && nrl.UDPAddrStr != vv.udpAddr.String() && (vv.Status&2) != 2 {
 
 				if vv.DevModel == 200 {
-					//普通设备发给200设备，需要将原始呼号和SSID放到协议头
 					newpacket := NRL21replace200and255dev(vv.CallSign, vv.SSID, nrl.Type, 200, nrl.CallSign, nrl.SSID, nrl.UDPAddr.IP.To4(), dev.DMRID, packet)
 					globelconn.WriteToUDP(newpacket, vv.udpAddr)
-					//这里不处理255设备
 				} else if vv.DevModel == 255 || vv.SSID == 255 {
 					continue
-
 				} else {
-					//普通设备发给普通设备，直接转发
-					globelconn.WriteToUDP(packet, vv.udpAddr)
+					sendPacketWithCodecCheck(packet, srcCodecType, vv, nrl.UDPAddrStr, nrl.timeStamp)
 				}
 
 			} else {
-
-				//更新自己连接池的上次报文接收时间
-				//vv.LastPacketTime = nrl.timeStamp
 				vv.LastVoiceEndTime = nrl.timeStamp
-
 			}
 		}
 
 		if gp.ID == 999 {
 			FullNetOutput(nrl, dev, packet)
-
 		}
 
 	}
 
+	// 每帧结束后清理转码缓存
+	clearTranscodeCache()
+
+}
+
+// sendPacketWithCodecCheck 检查目标设备是否支持源编码，不支持则转码后发送。
+func sendPacketWithCodecCheck(packet []byte, srcCodecType byte, vv *deviceInfo, srcAddrStr string, ts time.Time) {
+	supportsSrc := vv.SupportedCodecs&TypeToCodecCap(srcCodecType) != 0
+	if supportsSrc {
+		globelconn.WriteToUDP(packet, vv.udpAddr)
+	} else {
+		dstType := vv.PreferredCodec
+		if dstType == 0 {
+			dstType = CodecTypeG711 // 默认回退 G.711
+		}
+		newPacket, err := transcodePacket(packet, srcCodecType, dstType, vv)
+		if err != nil {
+			return
+		}
+		globelconn.WriteToUDP(newPacket, vv.udpAddr)
+	}
+}
+
+// bytesFromInt16 将 []int16 转换为 []byte (小端序)
+func bytesFromInt16(samples []int16) []byte {
+	b := make([]byte, len(samples)*2)
+	for i, s := range samples {
+		b[i*2] = byte(s)
+		b[i*2+1] = byte(s >> 8)
+	}
+	return b
 }
 func forwardServerVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, conn *net.UDPConn, gp *group) {
 
@@ -934,7 +955,11 @@ func forwardServerVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, conn *
 	} else if nrl.DevModel == 255 && nrl.SSID == 255 {
 		newpacket = NRL21replace200and255dev(nrl.OriginalCallsign, nrl.OriginalSSID, nrl.Type, 200, nrl.CallSign, nrl.SSID, nrl.OriginalIP, nrl.DMRID, packet)
 	}
-	callWSHub.publishVoiceFrame(gp, nrl.OriginalCallsign, nrl.OriginalSSID, nrl.DATA, nrl.timeStamp)
+	serverCodecType := nrl.CodecType
+	if serverCodecType == 0 {
+		serverCodecType = nrl.Type
+	}
+	callWSHub.publishVoiceFrame(gp, nrl.OriginalCallsign, nrl.OriginalSSID, nrl.DATA, nrl.timeStamp, serverCodecType)
 
 	for _, vv := range gp.connPool.snapshotList() {
 

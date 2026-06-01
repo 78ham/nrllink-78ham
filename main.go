@@ -3,9 +3,6 @@ package main
 import (
 	"log"
 	_ "net/http/pprof"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/ipipdotnet/ipdb-go"
@@ -15,6 +12,13 @@ import (
 var dbip *ipdb.City
 
 func main() {
+
+	// fmt.Println("heck database support ipv4:", db.IsIPv4())     // check database support ip type
+	// fmt.Println("check database support ip type:", db.IsIPv6()) // check database support ip type
+	// fmt.Println("database build time:", db.BuildTime())         // database build time
+	// fmt.Println("database support language:", db.Languages())   // database support language
+	// fmt.Println("database support fields:", db.Fields())        // database support fields
+
 	extra.RegisterFuzzyDecoders()
 
 	conf.init()
@@ -34,6 +38,8 @@ func main() {
 
 	updatedb()
 
+	ensureBootstrap()
+
 	chatgptInit()
 
 	initAllUserList()
@@ -41,8 +47,6 @@ func main() {
 	initPublicGroup()
 
 	initAllDevList()
-
-	initHomepageTables()
 
 	go jsonhttp.init()
 	go callWSHub.run()
@@ -56,21 +60,10 @@ func main() {
 
 	go NewAPRS().OnLoad()
 
+	//go findNRL()
+
 	go startPlatformServerSync()
 
-	// 优雅关闭
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-
-	go func() {
-		sig := <-sigCh
-		log.Printf("received signal %v, shutting down...", sig)
-		close(logbuffer)
-		if globelconn != nil {
-			globelconn.Close()
-		}
-		os.Exit(0)
-	}()
-
 	udpServer()
+
 }

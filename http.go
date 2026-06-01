@@ -5,7 +5,9 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"sync"
+
+	// _ "net/http/pprof"
+	// "github.com/jmoiron/sqlx"
 
 	"github.com/gorilla/mux"
 	jsoniter "github.com/json-iterator/go"
@@ -39,7 +41,6 @@ type platforminfo struct {
 }
 
 var totalstats = totalStats{}
-var totalstatsMu sync.RWMutex
 
 type totalStats struct {
 	DevNumber           int `json:"dev_number"`
@@ -60,19 +61,16 @@ type totalStats struct {
 }
 
 func (j *jsonapi) httpTotalStats(w http.ResponseWriter, req *http.Request) {
-	sethttphead(w)
 
-	totalstatsMu.Lock()
 	totalstats.DevNumber = devMapLen()
 	totalstats.OnlineDevNumber = currentOnlineDeviceCount()
 	totalstats.UserNumber = 1000
-	totalstatsMu.Unlock()
+	//totalstats.UserNumber = len(userlist)
 
-	totalstatsMu.RLock()
 	rescode, _ := jsonextra.Marshal(totalstats)
-	totalstatsMu.RUnlock()
 
 	respone := fmt.Sprintf(`{"code":20000,"data":{"items":%s}}`, rescode)
+
 	w.Write([]byte(respone))
 }
 
@@ -104,46 +102,11 @@ func (j *jsonapi) httpplatformList(w http.ResponseWriter, req *http.Request) {
 	w.Write([]byte(respone))
 }
 
-func (j *jsonapi) httpHealth(w http.ResponseWriter, req *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"status":"ok","service":"nrllink-udphub"}`))
-}
-
 func sethttphead(w http.ResponseWriter) {
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Add("Access-Control-Allow-Headers", "Content-Type")
 	w.Header().Add("Access-Control-Allow-Headers", "x-token")
 	w.Header().Set("content-type", "application/json")
-}
-
-func addTotalStatsPacket() {
-	totalstatsMu.Lock()
-	totalstats.PacketNumber++
-	totalstatsMu.Unlock()
-}
-
-func addTotalStatsTraffic(n int) {
-	totalstatsMu.Lock()
-	totalstats.Traffic += n
-	totalstatsMu.Unlock()
-}
-
-func addTotalStatsVoiceTime(n int) {
-	totalstatsMu.Lock()
-	totalstats.VoiceTime += n
-	totalstatsMu.Unlock()
-}
-
-func setTotalStatsOnlineDev(n int) {
-	totalstatsMu.Lock()
-	totalstats.OnlineDevNumber = n
-	totalstatsMu.Unlock()
-}
-
-func getTotalStatsOnlineDev() int {
-	totalstatsMu.RLock()
-	defer totalstatsMu.RUnlock()
-	return totalstats.OnlineDevNumber
 }
 
 func writeJSONResponseItems(w http.ResponseWriter, data interface{}, total int) {
@@ -200,10 +163,6 @@ func writeJSONResponseOpError(w http.ResponseWriter) {
 }
 
 func allowWebsocketHandshake(config *websocket.Config, req *http.Request) error {
-	origin := req.Header.Get("Origin")
-	if origin != "" {
-		return nil
-	}
 	return nil
 }
 
@@ -221,115 +180,114 @@ func (j *jsonapi) msghttp() {
 	//小程序登录
 	router.HandleFunc("/api/weixin/wxlogin/teacher", j.httpMPuserLogin)
 
-	http.HandleFunc("/platform/info", j.httpplatforminfo)
-	http.HandleFunc("/platform/list", j.httpplatformList)
-	http.HandleFunc("/platform/totalstats", j.httpTotalStats)
+	registerRoute := func(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+		http.HandleFunc(pattern, handler)
+	}
 
-	http.HandleFunc("/device/list", j.httpDeviceList)
-	http.HandleFunc("/device/db/list", j.httpDevicesList)
+	registerRoute("/platform/info", j.httpplatforminfo)
+	registerRoute("/platform/list", j.httpplatformList)
+	registerRoute("/platform/totalstats", j.httpTotalStats)
 
-	http.HandleFunc("/device/get", j.httpDevice)
-	http.HandleFunc("/device/qthmap", j.httpDeviceQTHs)
-	http.HandleFunc("/device/qth", j.httpDeviceQTHs)
-	http.HandleFunc("/device/qths", j.httpDeviceQTHs2)
-	http.HandleFunc("/device/qth2", j.httpDeviceQTH)
+	registerRoute("/device/list", j.httpDeviceList)
+	registerRoute("/device/db/list", j.httpDevicesList)
+	registerRoute("/device/get", j.httpDevice)
+	registerRoute("/device/qthmap", j.httpDeviceQTHs)
+	registerRoute("/device/qth", j.httpDeviceQTHs)
+	registerRoute("/device/qths", j.httpDeviceQTHs2)
+	registerRoute("/device/qth2", j.httpDeviceQTH)
+	registerRoute("/device/mydevlist", j.httpMyDeviceList)
+	registerRoute("/device/update", j.httpUpdateDevice)
+	registerRoute("/device/delete", j.httpDeleteDevice)
+	registerRoute("/device/changegroupnrl", j.httpChangeDeviceGroupNRL)
+	registerRoute("/device/query", j.httpQueryDeviceParm)
+	registerRoute("/device/change", j.httpChangeDeviceParm)
+	registerRoute("/device/change1w", j.httpChange1W)
+	registerRoute("/device/change2w", j.httpChange2W)
+	registerRoute("/device/at", j.httpDeviceAT)
 
-	http.HandleFunc("/device/mydevlist", j.httpMyDeviceList)
-	// http.HandleFunc("/device/binddevice", j.httpBindDevice)
-	http.HandleFunc("/device/update", j.httpUpdateDevice)
-	http.HandleFunc("/device/delete", j.httpDeleteDevice)
+	registerRoute("/group/get", j.httpGetGroup)
+	registerRoute("/group/list/mini", j.httpGetGroupList)
+	registerRoute("/group/list", j.httpPublicGroupList)
+	registerRoute("/group/device/list", j.httpGroupDeviceList)
+	registerRoute("/group/create", j.httpAddGroup)
+	registerRoute("/group/update", j.httpUpdateGroup)
+	registerRoute("/group/delete", j.httpDeleteGroup)
+	registerRoute("/group/listnrl", j.httpAllGroupListNRL)
 
-	http.HandleFunc("/device/changegroupnrl", j.httpChangeDeviceGroupNRL)
+	registerRoute("/room/list", j.httpRoomList)
 
-	http.HandleFunc("/device/query", j.httpQueryDeviceParm)
-	http.HandleFunc("/device/change", j.httpChangeDeviceParm)
-	http.HandleFunc("/device/change1w", j.httpChange1W)
-	http.HandleFunc("/device/change2w", j.httpChange2W)
-	http.HandleFunc("/device/at", j.httpDeviceAT)
+	registerRoute("/server/list", j.httpServersList)
+	registerRoute("/server/create", j.httpAddServer)
+	registerRoute("/server/update", j.httpUpdateServer)
+	registerRoute("/server/delete", j.httpDeleteServer)
 
-	http.HandleFunc("/group/get", j.httpGetGroup)
+	registerRoute("/relay/list", j.httpGetRelayList)
+	registerRoute("/relay/create", j.httpAddrelay)
+	registerRoute("/relay/update", j.httpUpdaterelay)
+	registerRoute("/relay/delete", j.httpDeleterelay)
 
-	http.HandleFunc("/group/list/mini", j.httpGetGroupList)
+	registerRoute("/user/reg/create", j.httpRegister)
+	registerRoute("/user/reg/add", j.httpAddReg)
+	registerRoute("/user/reg/update", j.httpUpdateReg)
+	registerRoute("/user/reg/list", j.httpRegisterList)
+	registerRoute("/user/reg/image/get", j.httpRegisterImage)
+	registerRoute("/user/reg/delete", j.httpDeleteRegUser)
 
-	http.HandleFunc("/group/list", j.httpPublicGroupList)
-	http.HandleFunc("/group/device/list", j.httpGroupDeviceList)
-	http.HandleFunc("/group/create", j.httpAddGroup)
-	http.HandleFunc("/group/update", j.httpUpdateGroup)
-	http.HandleFunc("/group/delete", j.httpDeleteGroup)
+	registerRoute("/user/login", j.httpUserLogin)
+	registerRoute("/user/info", j.httpUserInfo)
+	registerRoute("/user/logout", j.httpoplogout)
+	registerRoute("/user/alllist", j.httpUserAllList)
+	registerRoute("/user/list", j.httpUserList)
+	registerRoute("/user/userlistbyrole", j.httpUserListbyRole)
+	registerRoute("/user/detail", j.httpUserDetail)
+	registerRoute("/user/create", j.httpAddUser)
+	registerRoute("/user/update", j.httpUpdateUser)
+	registerRoute("/user/profile/update", j.httpUpdateUserProfile)
+	registerRoute("/user/update/avatar", j.httpUpdateUserAvatar)
+	registerRoute("/user/mdcid", j.httpGetMDCID)
+	registerRoute("/user/dmrid", j.httpGetDMRID)
+	registerRoute("/user/password", j.httpUpdateUserPassword)
+	registerRoute("/user/delete", j.httpDeleteUser)
 
-	http.HandleFunc("/group/listnrl", j.httpAllGroupListNRL)
+	registerRoute("/billing/info", j.httpBillingInfo)
+	registerRoute("/billing/packages/list", j.httpBillingPackages)
+	registerRoute("/billing/packages/create", j.httpBillingPackageCreate)
+	registerRoute("/billing/packages/update", j.httpBillingPackageUpdate)
+	registerRoute("/billing/packages/delete", j.httpBillingPackageDelete)
+	registerRoute("/billing/order/create", j.httpBillingOrderCreate)
+	registerRoute("/billing/order/query", j.httpBillingOrderQuery)
+	registerRoute("/billing/wechat/notify", j.httpBillingWechatNotify)
 
-	http.HandleFunc("/room/list", j.httpRoomList)
+	registerRoute("/roles/list", j.httpGetRoles)
+	registerRoute("/roles/create", j.httpRole)
+	registerRoute("/roles/routes", j.httpGetRoutes)
+	registerRoute("/roles/updateroutes", j.httpSetRoutes)
 
-	http.HandleFunc("/server/list", j.httpServersList)
-	http.HandleFunc("/server/create", j.httpAddServer)
-	http.HandleFunc("/server/update", j.httpUpdateServer)
-	http.HandleFunc("/server/delete", j.httpDeleteServer)
+	registerRoute("/operatorlog/list", j.httpOperatorLogList)
 
-	http.HandleFunc("/relay/list", j.httpGetRelayList)
-	http.HandleFunc("/relay/create", j.httpAddrelay)
-	http.HandleFunc("/relay/update", j.httpUpdaterelay)
-	http.HandleFunc("/relay/delete", j.httpDeleterelay)
+	// /api/v1/* 别名层（兼容新版前端）
+	api := func(pattern string, handler func(http.ResponseWriter, *http.Request)) {
+		http.HandleFunc("/api/v1"+pattern, handler)
+	}
+	api("/auth/login", j.httpUserLogin)
+	api("/auth/me", j.httpUserInfo)
+	api("/auth/logout", j.httpoplogout)
+	api("/devices", j.httpDeviceList)
+	api("/devices/db", j.httpDevicesList)
+	api("/devices/my", j.httpMyDeviceList)
+	api("/devices/qth", j.httpDeviceQTHs)
+	api("/groups", j.httpPublicGroupList)
+	api("/groups/mini", j.httpGetGroupList)
+	api("/groups/devices", j.httpGroupDeviceList)
+	api("/rooms", j.httpRoomList)
+	api("/relays", j.httpGetRelayList)
+	api("/servers", j.httpServersList)
+	api("/users", j.httpUserList)
+	api("/stats", j.httpTotalStats)
+	api("/platform/info", j.httpplatforminfo)
 
-	// http.HandleFunc("/device/create", j.httpAddDevice)
-	// http.HandleFunc("/device/update", j.httpUpdateDevice)
-	// http.HandleFunc("/device/delete", j.httpDeleteDevice)
-	http.HandleFunc("/user/reg/create", j.httpRegister)
-	http.HandleFunc("/user/reg/add", j.httpAddReg)
-	http.HandleFunc("/user/reg/update", j.httpUpdateReg)
-	http.HandleFunc("/user/reg/list", j.httpRegisterList)
-	http.HandleFunc("/user/reg/image/get", j.httpRegisterImage)
-	http.HandleFunc("/user/reg/delete", j.httpDeleteRegUser)
-
-	http.HandleFunc("/user/login", j.httpUserLogin)
-	http.HandleFunc("/user/info", j.httpUserInfo)
-	http.HandleFunc("/user/logout", j.httpoplogout)
-
-	http.HandleFunc("/user/alllist", j.httpUserAllList)
-	http.HandleFunc("/user/list", j.httpUserList)
-	http.HandleFunc("/user/userlistbyrole", j.httpUserListbyRole)
-	http.HandleFunc("/user/detail", j.httpUserDetail)
-	http.HandleFunc("/user/create", j.httpAddUser)
-	http.HandleFunc("/user/update", j.httpUpdateUser)
-	http.HandleFunc("/user/profile/update", j.httpUpdateUserProfile)
-	http.HandleFunc("/user/update/avatar", j.httpUpdateUserAvatar)
-
-	http.HandleFunc("/user/mdcid", j.httpGetMDCID)
-	http.HandleFunc("/user/dmrid", j.httpGetDMRID)
-
-	http.HandleFunc("/user/password", j.httpUpdateUserPassword)
-	http.HandleFunc("/user/delete", j.httpDeleteUser)
-
-	http.HandleFunc("/billing/info", j.httpBillingInfo)
-	http.HandleFunc("/billing/packages/list", j.httpBillingPackages)
-	http.HandleFunc("/billing/packages/create", j.httpBillingPackageCreate)
-	http.HandleFunc("/billing/packages/update", j.httpBillingPackageUpdate)
-	http.HandleFunc("/billing/packages/delete", j.httpBillingPackageDelete)
-	http.HandleFunc("/billing/order/create", j.httpBillingOrderCreate)
-	http.HandleFunc("/billing/order/query", j.httpBillingOrderQuery)
-	http.HandleFunc("/billing/wechat/notify", j.httpBillingWechatNotify)
-
-	//http.HandleFunc("/routes", j.httpRoutes)
-	http.HandleFunc("/roles/list", j.httpGetRoles)
-	http.HandleFunc("/roles/create", j.httpRole)
-	http.HandleFunc("/roles/routes", j.httpGetRoutes)
-	http.HandleFunc("/roles/updateroutes", j.httpSetRoutes)
-
-	//http.HandleFunc("/area/wxuserlist", j.httpGetWeiXinUserList)
-	http.HandleFunc("/operatorlog/list", j.httpOperatorLogList)
-
-	http.HandleFunc("/health", j.httpHealth)
-	http.HandleFunc("/api/homepage/sections", j.httpHomepageSections)
-	http.HandleFunc("/api/homepage/announcements", j.httpHomepageAnnouncements)
-	http.HandleFunc("/api/admin/homepage/sections", j.httpAdminHomepageSections)
-	http.HandleFunc("/api/admin/homepage/sections/update", j.httpAdminHomepageSectionsUpdate)
-	http.HandleFunc("/api/admin/homepage/sections/delete", j.httpAdminHomepageSectionsDelete)
-	http.HandleFunc("/api/admin/homepage/announcements/create", j.httpAdminHomepageAnnouncementsCreate)
-	http.HandleFunc("/api/admin/homepage/announcements/update", j.httpAdminHomepageAnnouncementsUpdate)
-	http.HandleFunc("/api/admin/homepage/announcements/delete", j.httpAdminHomepageAnnouncementsDelete)
-	http.HandleFunc("/api/admin/homepage/images/upload", j.httpAdminHomepageImageUpload)
-	http.HandleFunc("/api/admin/homepage/images/list", j.httpAdminHomepageImageList)
-	http.HandleFunc("/api/admin/homepage/images/delete", j.httpAdminHomepageImageDelete)
+	//http.HandleFunc("/login", j.httplogin)
+	//http.HandleFunc("/reg", j.httpreg)
 
 	http.Handle("/ws", websocket.Server{
 		Handler:   websocket.Handler(upper),

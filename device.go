@@ -109,7 +109,7 @@ func (j *jsonapi) httpDeviceList(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	setTotalStatsOnlineDev(onlineDeviceTotal)
+	totalstats.OnlineDevNumber = onlineDeviceTotal
 
 	rescode, _ := jsonextra.Marshal(devicelist)
 
@@ -167,7 +167,7 @@ func (j *jsonapi) httpGroupDeviceList(w http.ResponseWriter, req *http.Request) 
 
 	} else {
 
-		if g, ok := getPublicGroup(grolupid); ok {
+		if g, ok := publicGroupMap[grolupid]; ok {
 
 			for _, v := range g.devMap {
 				if v.ISOnline {
@@ -246,10 +246,10 @@ func (j *jsonapi) httpDevice(w http.ResponseWriter, req *http.Request) {
 func (j *jsonapi) httpDeviceQTH(w http.ResponseWriter, req *http.Request) {
 	sethttphead(w)
 
-	_, err := checktoken(w, req)
-	if err != nil {
-		return
-	}
+	// _, err := checktoken(w, req)
+	// if err != nil {
+	// 	return
+	// }
 
 	result, _ := io.ReadAll(req.Body)
 

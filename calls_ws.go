@@ -81,6 +81,11 @@ type wsCallHub struct {
 	lastOnlineDevices int
 }
 
+type audioBufferEntry struct {
+	data      []byte
+	codecType byte
+}
+
 type wsCallClient struct {
 	hub           *wsCallHub
 	ws            *websocket.Conn
@@ -94,7 +99,14 @@ type wsCallClient struct {
 	audioBuffers  map[string][]byte
 }
 
-const wsCallAudioFrameSize = 160
+// wsCallAudioFrameSize 返回当前音频帧大小（根据配置的采样率动态计算）
+func wsCallAudioFrameSize() int {
+	sr := conf.Voice.MixSampleRate
+	if sr == 0 {
+		sr = 16000
+	}
+	return sr * 20 / 1000 // MixSampleRate * 20ms
+}
 const wsCallMaxBufferedBytes = 500 * 50
 const wsCallClientTimeout = 25 * time.Second
 
@@ -144,9 +156,8 @@ func (h *wsCallHub) totalSubscriptions() int {
 }
 
 func currentOnlineDeviceCount() int {
-	n := getTotalStatsOnlineDev()
-	if n > 0 {
-		return n
+	if totalstats.OnlineDevNumber > 0 {
+		return totalstats.OnlineDevNumber
 	}
 	return onlineDevMapLen()
 }
@@ -440,10 +451,9 @@ func canUserAccessGroup(u *userinfo, gp *group) bool {
 }
 
 func accessibleRooms(u *userinfo) map[string]*group {
-	publicGroups := getPublicGroupSnapshot()
-	rooms := make(map[string]*group, len(publicGroups)+3)
+	rooms := make(map[string]*group, len(publicGroupMap)+3)
 
-	for _, gp := range publicGroups {
+	for _, gp := range publicGroupMap {
 		if !canUserAccessGroup(u, gp) {
 			continue
 		}
@@ -625,8 +635,8 @@ func (h *wsCallHub) touchRoomActivity(gp *group, callsign string, ssid byte, ts 
 	}
 }
 
-func (h *wsCallHub) publishVoiceFrame(gp *group, callsign string, ssid byte, g711 []byte, ts time.Time, speakers ...wsSpeaker) {
-	if gp == nil || len(g711) == 0 {
+func (h *wsCallHub) publishVoiceFrame(gp *group, callsign string, ssid byte, audio []byte, ts time.Time, codecType byte, speakers ...wsSpeaker) {
+	if gp == nil || len(audio) == 0 {
 		return
 	}
 
@@ -640,8 +650,13 @@ func (h *wsCallHub) publishVoiceFrame(gp *group, callsign string, ssid byte, g71
 	h.mu.RUnlock()
 
 	roomKey := roomKeyFromGroup(gp)
+	// 格式：[1字节CodecType][N字节音频数据]
+	framed := make([]byte, 1+len(audio))
+	framed[0] = codecType
+	copy(framed[1:], audio)
+
 	for _, client := range clients {
-		client.enqueueAudio(roomKey, g711)
+		client.enqueueAudio(roomKey, framed)
 	}
 }
 
@@ -753,15 +768,15 @@ func (c *wsCallClient) sendBinary(data []byte) error {
 	return websocket.Message.Send(c.ws, data)
 }
 
-func (c *wsCallClient) enqueueAudio(roomKey string, g711 []byte) {
+func (c *wsCallClient) enqueueAudio(roomKey string, audio []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.closed || !c.subscriptions[roomKey] || len(g711) == 0 {
+	if c.closed || !c.subscriptions[roomKey] || len(audio) == 0 {
 		return
 	}
 
-	buf := append(c.audioBuffers[roomKey], g711...)
+	buf := append(c.audioBuffers[roomKey], audio...)
 	if len(buf) > wsCallMaxBufferedBytes {
 		buf = buf[len(buf)-wsCallMaxBufferedBytes:]
 	}
@@ -883,29 +898,50 @@ func (c *wsCallClient) nextMixedFrame() []byte {
 		return nil
 	}
 
-	frames := make([][]byte, 0, len(c.subscriptions))
+	// 收集各订阅房间的可解码帧
+	type framedAudio struct {
+		codecType byte
+		data      []byte // 去掉前缀的原始音频数据
+	}
+	frames := make([]framedAudio, 0, len(c.subscriptions))
+	firstFrame := []byte(nil)
+
 	for key := range c.subscriptions {
 		buf := c.audioBuffers[key]
-		if len(buf) == 0 {
+		if len(buf) <= 1 {
 			continue
 		}
 
-		frame := make([]byte, wsCallAudioFrameSize)
-		for i := range frame {
-			frame[i] = wsCallSilenceALaw
+		codecType := buf[0]    // 第1字节为编码类型
+		audioData := buf[1:]    // 后续为音频数据
+
+		if firstFrame == nil {
+			firstFrame = make([]byte, 1+wsCallAudioFrameSize())
+			firstFrame[0] = codecType
 		}
 
-		n := wsCallAudioFrameSize
-		if len(buf) < n {
-			n = len(buf)
+		frameSize := wsCallAudioFrameSize()
+		if codecType != CodecTypeG711 {
+			frameSize = len(audioData)
+			if frameSize > 400 {
+				frameSize = 400
+			}
 		}
-		copy(frame, buf[:n])
-		frames = append(frames, frame)
 
-		if len(buf) <= wsCallAudioFrameSize {
+		if len(audioData) < frameSize {
+			delete(c.audioBuffers, key)
+			continue
+		}
+
+		frames = append(frames, framedAudio{
+			codecType: codecType,
+			data:      audioData[:frameSize],
+		})
+
+		if len(buf) <= 1+frameSize {
 			delete(c.audioBuffers, key)
 		} else {
-			c.audioBuffers[key] = buf[wsCallAudioFrameSize:]
+			c.audioBuffers[key] = buf[1+frameSize:]
 		}
 	}
 
@@ -913,14 +949,26 @@ func (c *wsCallClient) nextMixedFrame() []byte {
 	case 0:
 		return nil
 	case 1:
-		return append([]byte(nil), frames[0]...)
+		// 单路音频：直接透传（带编码类型前缀）
+		f := frames[0]
+		out := make([]byte, 1+len(f.data))
+		out[0] = f.codecType
+		copy(out[1:], f.data)
+		return out
 	}
 
-	mixedPCM := make([]int, wsCallAudioFrameSize)
-	for _, frame := range frames {
-		for i := 0; i < wsCallAudioFrameSize; i++ {
-			sample := frame[i]
-			mixedPCM[i] += int(alaw2linear(sample))
+	// 多路音频：解码到 PCM → 混音 → 编码为 G.711（浏览器通用）
+	mixedPCM := make([]int, wsCallAudioFrameSize())
+	for _, f := range frames {
+		pcm, err := DecodeToPCM(f.codecType, f.data)
+		if err != nil {
+			continue
+		}
+		if len(pcm) > wsCallAudioFrameSize() {
+			pcm = pcm[:wsCallAudioFrameSize()]
+		}
+		for i := 0; i < len(pcm); i++ {
+			mixedPCM[i] += int(pcm[i])
 		}
 	}
 
@@ -933,7 +981,12 @@ func (c *wsCallClient) nextMixedFrame() []byte {
 		mixedPCM[i] = sample
 	}
 
-	return G711Encode(mixedPCM)
+	// 混音输出为 G.711，前缀编码类型
+	g711 := G711Encode(mixedPCM)
+	out := make([]byte, 1+len(g711))
+	out[0] = CodecTypeG711
+	copy(out[1:], g711)
+	return out
 }
 
 func (c *wsCallClient) audioLoop() {
@@ -971,17 +1024,20 @@ func (j *jsonapi) wsCallStream(ws *websocket.Conn) {
 	}
 
 	tokenString := req.URL.Query().Get("token")
-	token, err := ValidateToken(tokenString)
-	if err != nil {
-		ws.Close()
-		return
-	}
+	var user *userinfo
+	if tokenString != "" {
+		token, err := ValidateToken(tokenString)
+		if err != nil {
+			ws.Close()
+			return
+		}
 
-	user, err := getuser(token.Username)
-	if err != nil || user.Status != 1 {
-		log.Println("websocket user lookup failed:", err)
-		ws.Close()
-		return
+		user, err = getuser(token.Username)
+		if err != nil || user.Status != 1 {
+			log.Println("websocket user lookup failed:", err)
+			ws.Close()
+			return
+		}
 	}
 
 	client := newWSCallClient(callWSHub, ws, user)

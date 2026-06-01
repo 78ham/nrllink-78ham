@@ -15,20 +15,24 @@ type NRL21packet struct {
 	timeStamp  time.Time
 	UDPAddrStr string
 	UDPAddr    *net.UDPAddr //报文来源UDP地址和端口
-	Version    string       //协议标识 “NRL2” 每个报文都以 NRL2 4个字节开头
+	Version    string       //协议标识 "NRL2" 每个报文都以 NRL2 4个字节开头
 	Length     uint16       //上层数据长度
 	DMRID      uint32       //设备唯一标识 长度3字节
 	Password   string       //密码11个字节
-	Type       byte         //上层数据类型 一个字节 0:保留， 1：G.711语音，2：心跳  3：设备配置 4：保留，5. 文本消息，6，设备控制设备， 7，设备要求加入组等指令 9:服务器互联语音,11 AT透传
+	Type       byte         //上层数据类型 一个字节
 	Status     byte         //设备状态位
 	Count      uint16       //报文计数器2节
 	CallSign   string       //所有者呼号 6字节
 	SSID       byte         //所有者呼号 1字节
 	DevModel   byte         //设备型号
 
-	OriginalCallsign string //原始呼号
-	OriginalSSID     uint8  //原始SSID
-	OriginalIP       net.IP //原始IP
+	// 编码字段 (偏移 32-33，仅普通设备使用；DevModel 200/255 时被原始呼号覆盖)
+	CodecType byte // 本帧音频编码类型（0=未知/旧设备，视为 G.711）
+	CodecCaps byte // 设备支持的编码能力位图 (bit0=G711, bit1=Opus, bit2=Codec2)
+
+	OriginalCallsign string //原始呼号 (仅 DevModel 200/255)
+	OriginalSSID     uint8  //原始SSID (仅 DevModel 200/255)
+	OriginalIP       net.IP //原始IP (仅 DevModel 200/255)
 
 	DATA []byte //上层数据内容
 }
@@ -59,31 +63,41 @@ NRL2 协议规范 (NRL2 Protocol Specification)
 4-5           | 2             | Length              | 报文总长度 (头部+数据)，uint16
 6-8           | 3             | DMRID               | 设备DMR标识。decode 取 3 字节 [6:9]
 9-19          | 11            | Password            | 设备访问密码
-20            | 1             | Type                | 数据类型：
-              |               |                     | 0: 保留
-              |               |                     | 1: G.711 语音 (PCM A-law)
-              |               |                     | 2: 心跳 (Heartbeat) 2秒一次
-              |               |                     | 3: 设备配置 (Config)
-              |               |                     | 5: 文本消息 (Text Message)
-              |               |                     | 6: 设备控制 (Control)
-              |               |                     | 7: 组加入指令 (Join Group)
-			  |			      |                     | 8: Opus 16K
-              |               |                     | 9: 服务器互联语音 (Server Interconnect Voice) //后续版本废弃
-              |               |                     | 11: AT 透传 (AT Passthrough)
+ 20            | 1             | Type                | 数据类型：
+               |               |                     | 0: 保留
+               |               |                     | 1: G.711 语音 (PCM A-law)
+               |               |                     | 2: 心跳 (Heartbeat) 2秒一次
+               |               |                     | 3: 设备配置 (Config)
+               |               |                     | 5: 文本消息 (Text Message)
+               |               |                     | 6: 设备控制 (Control)
+               |               |                     | 7: 组加入指令 (Join Group)
+               |               |                     | 8: Opus 16K
+               |               |                     | 9: 服务器互联语音 (Server Interconnect Voice) //后续版本废弃
+               |               |                     | 11: AT 透传 (AT Passthrough)
+               |               |                     | 12: Codec2 700C 语音
+               |               |                     | 13: Codec2 1300 语音
+               |               |                     | 14: Codec2 1600 语音
+               |               |                     | 15: Codec2 2400 语音
+               |               |                     | 16: Codec2 3200 语音
 21            | 1             | Status              | 设备状态位 //下个版本去掉，变成保留字段
 22-23         | 2             | Count               | 报文计数器
 24-29         | 6             | CallSign            | 所有者呼号，不足 6 位补 0
 30            | 1             | SSID                | 所有者 SSID  0保留，1-99硬件， 100-199软件，200-255 服务器特殊用途
 31            | 1             | DevModel            | 设备型号    0保留 1-99硬件， 100-199软件，200-255 服务器特殊用途
-32-45         | 16            | Reserved/Extended   | 保留项或扩展内容
-46-47         | 2             | CRC                 | 校验码
-48-           | -             | DATA                | 上层协议数据负载
+ 32-33         | 2             | CodecType/Caps      | 编解码扩展字段 (普通设备)：
+                |               |                     |   偏移32: CodecType 本帧音频编码类型
+                |               |                     |     0=未知/旧设备(视为G.711), 1=G.711, 8=Opus, 12=Codec2 700C, 13=Codec2 1300, 14=Codec2 1600, 15=Codec2 2400, 16=Codec2 3200
+                |               |                     |   偏移33: CodecCaps 设备能力位图
+                |               |                     |     bit0=G.711, bit1=Opus, bit2=Codec2
+ 34-45         | 12            | Reserved            | 保留项
+ 46-47         | 2             | CRC                 | 校验码
+ 48-           | -             | DATA                | 上层协议数据负载
 
 
 //扩展内容 设备型号是200或者255，或者 Type 是 9 的报文，扩展内容定义如下：（9之后版本废弃）
-32-37         | 6             | OrigCallsign        | 原始呼号 (仅 dev200,255 使用；其余类型作为扩展内容)
-38            | 1             | OrigSSID            | 原始 SSID (仅 dev200,255 使用；其余类型作为扩展内容)
-39-42         | 4             | OrigIP              | 原始 IP 地址 (仅 dev200,255使用；其余类型作为扩展内容)
+ 32-37         | 6             | OrigCallsign        | 原始呼号 (仅 dev200,255 使用；其余类型作为扩展内容)
+ 38            | 1             | OrigSSID            | 原始 SSID (仅 dev200,255 使用；其余类型作为扩展内容)
+ 39-42         | 4             | OrigIP              | 原始 IP 地址 (仅 dev200,255使用；其余类型作为扩展内容)
 
 
 //type 5 文本消息子类型规范，使用[]头表达内容的媒体类型,不带方括号的默认为纯文本类型，
@@ -132,10 +146,6 @@ func (n *NRL21packet) decodeNRL21(d []byte) (err error) {
 
 	n.Length = binary.BigEndian.Uint16(d[4:6])
 
-	if int(n.Length) > len(d) {
-		return errors.New("packet length field exceeds data length")
-	}
-
 	n.DMRID = bytesToUint24(d[6:9])
 	n.Password = string(d[9:20])
 	n.Type = d[20]
@@ -154,6 +164,11 @@ func (n *NRL21packet) decodeNRL21(d []byte) (err error) {
 		n.OriginalCallsign = string(bytes.TrimRight(d[32:38], string([]byte{13, 0})))
 		n.OriginalSSID = d[38]
 		n.OriginalIP = d[39:43]
+		// 200/255 设备沿用旧协议，无单独 CodecType/Caps 字段
+	} else {
+		// 普通设备：偏移 32=CodecType, 33=CodecCaps
+		n.CodecType = d[32]
+		n.CodecCaps = d[33]
 	}
 
 	n.DATA = d[48:]
@@ -219,86 +234,73 @@ func NRL21replace200and255dev(callsign string, ssid, packetType, DevModel uint8,
 
 	copy(packet, data)
 
-	// 写入 DMRID
-
 	NRL21SetDevDMRID(dmrid, packet)
 
-	// 写入 Type  2
 	packet[20] = packetType
 
-	// 写入 CallSign
 	copy(packet[24:30], callsign)
 
 	if len(callsign) == 5 {
 		packet[29] = 0
 	}
 
-	// 写入 SSID
 	packet[30] = ssid
 
-	// 写入 DevMode
 	packet[31] = DevModel
 
-	// 协议原始呼号
 	copy(packet[32:38], originalCallsign)
 	if len(originalCallsign) == 5 {
 		packet[37] = 0
 	}
 
-	// 写入原始SSID
 	packet[38] = originaSSID
 
-	// 写入 IP 地址
 	copy(packet[39:43], originalIP)
 
 	return packet
 
 }
 
-func encodeNRL21(callsign string, ssid, packetType, DevModel uint8, dmrid uint32, data []byte) (packet []byte) {
+// EncodeNRL21Option 编码选项，用于扩展编码字段
+type EncodeNRL21Option struct {
+	CodecType byte // 本帧编码类型 (写入偏移32)
+	CodecCaps byte // 设备能力位图 (写入偏移33)
+}
 
-	//编码报名
+func encodeNRL21(callsign string, ssid, packetType, DevModel uint8, dmrid uint32, data []byte) (packet []byte) {
+	return encodeNRL21WithOpts(callsign, ssid, packetType, DevModel, dmrid, data, EncodeNRL21Option{})
+}
+
+func encodeNRL21WithOpts(callsign string, ssid, packetType, DevModel uint8, dmrid uint32, data []byte, opts EncodeNRL21Option) (packet []byte) {
 
 	const fixedBufferSize = 48
 
-	// 计算总大小
 	totalSize := fixedBufferSize + len(data)
 
-	// 创建字节切片
 	packet = make([]byte, totalSize)
 
-	// 写入固定头部
 	copy(packet[0:4], []byte("NRL2"))
 
-	// 写入长度
 	binary.BigEndian.PutUint16(packet[4:6], uint16(totalSize))
-
-	// 写入 DMRID
 
 	NRL21SetDevDMRID(dmrid, packet)
 
-	// 写入 Type  2
 	packet[20] = packetType
 
-	// 写入 Status
 	packet[21] = 1
 
-	// 写入 Count
-	// binary.BigEndian.PutUint16(data[18:20], n.Count)
-
-	// 写入 CallSign
 	copy(packet[24:30], callsign)
-	// if len(callsign) == 5 {
-	// 	packet[29] = 0
-	// }
 
-	// 写入 SSID
 	packet[30] = ssid
 
-	// 写入 DevMode
 	packet[31] = DevModel
 
-	// 写入 DATA
+	// 编码扩展字段 (仅普通设备写入)
+	if DevModel != 200 && DevModel != 255 {
+		packet[32] = opts.CodecType
+		packet[33] = opts.CodecCaps
+	}
+
 	if len(data) > 0 {
 		copy(packet[48:], data)
 	}

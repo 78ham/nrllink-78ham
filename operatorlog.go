@@ -45,7 +45,7 @@ func (j *jsonapi) httpOperatorLogList(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	ww, _, p, _ := queryToWhere("", *stb)
+	ww, p, _ := queryToWhere("", *stb)
 
 	list, total := getOperatorLog(ww, p)
 

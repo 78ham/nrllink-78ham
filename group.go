@@ -56,7 +56,7 @@ func (j *jsonapi) httpPublicGroupList(w http.ResponseWriter, req *http.Request) 
 
 	groupmap := make(map[int]*group)
 
-	for k, v := range getPublicGroupSnapshot() {
+	for k, v := range publicGroupMap {
 
 		groupmap[k] = v
 	}
@@ -89,7 +89,7 @@ func (j *jsonapi) httpAllGroupListNRL(w http.ResponseWriter, req *http.Request) 
 
 	str := ""
 
-	for _, v := range getPublicGroupSnapshot() {
+	for _, v := range publicGroupMap {
 		str = str + fmt.Sprintf("%v,%v\n", v.ID, v.Name)
 
 	}
@@ -133,7 +133,7 @@ func (j *jsonapi) httpGetGroup(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-	} else if g, ok := getPublicGroup(groupid); ok {
+	} else if g, ok := publicGroupMap[groupid]; ok {
 		writeJSONResponseItem(w, newGroupDetail(g))
 		return
 

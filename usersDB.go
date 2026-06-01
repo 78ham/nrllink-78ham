@@ -124,7 +124,7 @@ func getRoleByKey(key string) *role {
 	r := &role{}
 
 	row := db.QueryRow("SELECT * from roles where name_key=?", key)
-	err := row.Scan(&r.ID, &r.NameKey, &r.Name, &r.Description, &r.Routes)
+	err := row.Scan(&r.ID, &r.Name, &r.Name, &r.Description, &r.Routes)
 	if err != nil {
 		log.Println("query role by key err:", err, r, key)
 	}
@@ -280,15 +280,16 @@ func getuserByID(id int) (*userinfo, error) {
 func getEmpListByRole(role string) ([]userinfo, int) {
 
 	emp := []userinfo{}
-	rolePattern := "%" + role + "%"
 
-	rows, err := db.Query(`SELECT id,name,callsign,gird,phone,birthday,mdcid,dmrid,
+	query := fmt.Sprintf(`SELECT id,name,callsign,gird,phone,password,birthday,mdcid,dmrid,
 	sex,avatar,address,roles,introduction,alarm_msg,status,update_time,last_login_time,
 	login_err_times,create_time,openid,nickname,pid,last_login_ip,expire_time FROM users
-	 where  roles like ?  ORDER BY id ASC`, rolePattern)
+	 where  roles like '%%%v%%'  ORDER BY id ASC`, role)
+
+	rows, err := db.Query(query)
 
 	if err != nil {
-		log.Println("按角色查询用户列表错误: ", err, '\n', rolePattern)
+		log.Println("按角色查询用户列表错误: ", err, '\n', query)
 		return nil, 0
 
 	}
@@ -297,12 +298,12 @@ func getEmpListByRole(role string) ([]userinfo, int) {
 
 		r := userinfo{}
 		var roles string
-		err := rows.Scan(&r.ID, &r.Name, &r.CallSign, &r.Gird, &r.Phone, &r.Birthday, &r.MDCID, &r.DMRID,
+		err := rows.Scan(&r.ID, &r.Name, &r.CallSign, &r.Gird, &r.Phone, &r.Password, &r.Birthday, &r.MDCID, &r.DMRID,
 			&r.Sex, &r.Avatar, &r.Address,
 			&roles, &r.Introduction, &r.AlarmMsg, &r.Status, &r.UpdateTime, &r.LastLoginTime, &r.LoginErrTimes,
 			&r.CreateTime, &r.OpenID, &r.NickName, &r.PID, &r.LastLoginIP, &r.ExpireTime)
 		if err != nil {
-			log.Println("getuser by username err :", err, "\n", rolePattern)
+			log.Println("getuser by username err :", err, "\n", query)
 			continue
 		}
 		r.Roles = strings.Split(roles, ",")
@@ -310,11 +311,13 @@ func getEmpListByRole(role string) ([]userinfo, int) {
 	}
 
 	var t int
-	row := db.QueryRow(`SELECT count(*) as total FROM users where roles like ?`, rolePattern)
+	q := fmt.Sprintf(`SELECT count(*) as total FROM users where  roles like '%%%v%%' ' `, role)
+	//fmt.Println(q)
+	row := db.QueryRow(q)
 	err = row.Scan(&t)
 
 	if err != nil {
-		log.Println(" 查询教师用户列表total错误 err:", err, '\n', rolePattern, t)
+		log.Println(" 查询教师用户列表total错误 err:", err, '\n', q, t)
 		return nil, 0
 	}
 	//fmt.Println(emp)
@@ -358,7 +361,7 @@ func loginCheck(password string, username string, ip string) ([]string, bool) {
 	row := db.QueryRow("SELECT password ,login_err_times,status,roles FROM users where phone=? or callsign=?", username, username)
 	err := row.Scan(&r.Password, &r.LoginErrTimes, &r.Status, &roles)
 	if err != nil {
-		log.Println("login err:", err, r, username)
+		log.Println("login err:", err, r, password, username)
 		return nil, false
 	}
 
@@ -371,7 +374,7 @@ func loginCheck(password string, username string, ip string) ([]string, bool) {
 		passwordOK = true
 	}
 
-	if r.LoginErrTimes < 10 && passwordOK {
+	if r.LoginErrTimes < conf.Security.MaxLoginAttempts && passwordOK {
 		_, err = db.Exec(`update users set last_login_time=CURRENT_TIMESTAMP,last_login_ip=?,login_err_times=1 where phone=? or callsign=?`, ip, username, username)
 		if err != nil {
 			log.Println("update users last_login_time and last_login_ip  failed, ", err)
@@ -391,7 +394,7 @@ func loginCheck(password string, username string, ip string) ([]string, bool) {
 
 	//fmt.Println(r.PasswordOK, r.Status, r.LoginErrTimes)
 
-	return r.Roles, passwordOK && r.Status == 1 && r.LoginErrTimes < 10
+	return r.Roles, passwordOK && r.Status == 1 && r.LoginErrTimes < conf.Security.MaxLoginAttempts
 
 }
 
@@ -418,6 +421,10 @@ func loginCheck(password string, username string, ip string) ([]string, bool) {
 // }
 
 func addUser(e *userinfo) error {
+
+	if err := validatePassword(e.Password); err != nil {
+		return err
+	}
 
 	password, err := bcrypt.GenerateFromPassword([]byte(e.Password), bcrypt.DefaultCost)
 
@@ -566,6 +573,9 @@ func updateweixininfo(e wxUserInfo, studentid int) error {
 func updateUserPassword(id int, password string) error {
 
 	if password != "" {
+		if err := validatePassword(password); err != nil {
+			return err
+		}
 
 		password, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 
@@ -592,6 +602,9 @@ func updateUserProfile(id int, dmrid string, mdcid string, avatar string, passwo
 	}
 
 	if password != "" {
+		if err := validatePassword(password); err != nil {
+			return err
+		}
 		passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
 			return err

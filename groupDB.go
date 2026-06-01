@@ -7,41 +7,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
 var publicGroupMap = make(map[int]*group, 1000) //key 房间号
-var publicGroupMapMu sync.RWMutex
-
-func getPublicGroup(id int) (*group, bool) {
-	publicGroupMapMu.RLock()
-	g, ok := publicGroupMap[id]
-	publicGroupMapMu.RUnlock()
-	return g, ok
-}
-
-func getPublicGroupSnapshot() map[int]*group {
-	publicGroupMapMu.RLock()
-	res := make(map[int]*group, len(publicGroupMap))
-	for k, v := range publicGroupMap {
-		res[k] = v
-	}
-	publicGroupMapMu.RUnlock()
-	return res
-}
-
-func setPublicGroup(id int, g *group) {
-	publicGroupMapMu.Lock()
-	publicGroupMap[id] = g
-	publicGroupMapMu.Unlock()
-}
-
-func deletePublicGroupByID(id int) {
-	publicGroupMapMu.Lock()
-	delete(publicGroupMap, id)
-	publicGroupMapMu.Unlock()
-}
 
 /*
 export const groupTypeOptions = [
@@ -121,16 +90,24 @@ func (p *group) mixPCM() {
 		return
 	}
 
-	pcm := make([]int, 160)
-	globalG711 := make([]byte, 160)
-	newG711 := make([]byte, 160)
-	data := make([]byte, 160)
+	// 使用配置的采样率计算帧大小（20ms）
+	mixRate := conf.Voice.MixSampleRate
+	if mixRate == 0 {
+		mixRate = 16000
+	}
+	frameSamples := mixRate * 20 / 1000 // 每帧样本数
+	frameBytes := frameSamples          // G.711 是 1字节/样本
+
+	pcm := make([]int, frameSamples)
+	globalG711 := make([]byte, frameBytes)
+	newG711 := make([]byte, frameBytes)
+	data := make([]byte, frameBytes)
 
 	globalPacket := encodeNRL21("MEETLY", 201, 1, 201, 0, data)
 	speakerPacket := encodeNRL21("MEETLY", 201, 1, 201, 0, data)
 	speakerB_Packet := encodeNRL21("MEETLY", 201, 1, 201, 0, data)
 
-	log.Println("mixPCM:", "p:", p)
+	log.Println("mixPCM:", "p:", p, "frameSamples:", frameSamples)
 
 	type activeSpeaker struct {
 		dev     *deviceInfo
@@ -155,14 +132,14 @@ func (p *group) mixPCM() {
 			continue
 		}
 
-		// 1. 收集发言者数据：从设备缓存取160字节，不足则跳过
+		// 1. 收集发言者数据：从设备缓存取 frameSamples 字节，不足则跳过
 		for _, vv := range devConnList {
 			vv.speaking = false
 
 			vv.pcmMu.Lock()
-			if len(vv.pcmBuf) >= 160 {
-				frame := vv.pcmBuf[:160]
-				n := copy(vv.pcmBuf, vv.pcmBuf[160:])
+			if len(vv.pcmBuf) >= frameBytes {
+				frame := vv.pcmBuf[:frameBytes]
+				n := copy(vv.pcmBuf, vv.pcmBuf[frameBytes:])
 				vv.pcmBuf = vv.pcmBuf[:n]
 				vv.pcmMu.Unlock()
 				vv.speaking = true
@@ -182,7 +159,7 @@ func (p *group) mixPCM() {
 			// --- 单人发言直通 (Bypass) ---
 			// 直接透传原始字节，音质无损
 			copy(globalPacket[48:], speakers[0].rawG711)
-			callWSHub.publishVoiceFrame(p, "", 0, speakers[0].rawG711, time.Now(), wsSpeaker{
+			callWSHub.publishVoiceFrame(p, "", 0, speakers[0].rawG711, time.Now(), CodecTypeG711, wsSpeaker{
 				Callsign: speakers[0].dev.CallSign,
 				SSID:     speakers[0].dev.SSID,
 			})
@@ -220,7 +197,7 @@ func (p *group) mixPCM() {
 					SSID:     speaker.dev.SSID,
 				})
 			}
-			callWSHub.publishVoiceFrame(p, "", 0, globalG711, time.Now(), wsSpeakers...)
+			callWSHub.publishVoiceFrame(p, "", 0, globalG711, time.Now(), CodecTypeG711, wsSpeakers...)
 
 			if numbs == 2 {
 				// --- 双人对讲互传优化 ---
@@ -443,7 +420,7 @@ func getMiniGroupList(u *userinfo) []minigroup {
 
 	grouplist := getUserGroupList(u)
 
-	for _, v := range getPublicGroupSnapshot() {
+	for _, v := range publicGroupMap {
 
 		g := minigroup{
 			ID:              v.ID,
@@ -513,7 +490,7 @@ func changeDevGroup(dev *deviceInfo, groupid int) (group string, err error) {
 
 	//检查目标组是否允许此设备加入
 
-	if g, ok := getPublicGroup(groupid); ok {
+	if g, ok := publicGroupMap[groupid]; ok {
 
 		if len(g.AllowCALLSSIDList) > 0 {
 			if !slices.Contains(g.AllowCALLSSIDList, dev.CallSignSSID) {
@@ -528,7 +505,7 @@ func changeDevGroup(dev *deviceInfo, groupid int) (group string, err error) {
 
 	if dev.GroupID >= 999 || dev.GroupID == 0 {
 
-		if g, ok := getPublicGroup(dev.GroupID); ok {
+		if g, ok := publicGroupMap[dev.GroupID]; ok {
 			g.connPool.removeDevice(dev.udpAddr.String())
 
 			delete(g.devMap, dev.ID)
@@ -553,7 +530,7 @@ func changeDevGroup(dev *deviceInfo, groupid int) (group string, err error) {
 
 	if groupid >= 999 || groupid == 0 {
 
-		if g, ok := getPublicGroup(groupid); ok {
+		if g, ok := publicGroupMap[groupid]; ok {
 			dev.GroupID = groupid
 			g.devMap[dev.ID] = dev
 			if dev.udpAddr != nil {
@@ -612,13 +589,13 @@ func addPublicGroup(pg *group) error {
 		return fmt.Errorf("群组添加失败")
 
 	}
-	if _, ok := getPublicGroup(newpg.ID); !ok {
+	if _, ok := publicGroupMap[newpg.ID]; !ok {
 		newpg.connPool = &currentConnPool{devConnMap: make(map[string]*deviceInfo)}
 		newpg.devMap = make(map[int]*deviceInfo, 10)
 		if newpg.Type == 7 {
 			newpg.startMixPCM()
 		}
-		setPublicGroup(newpg.ID, newpg)
+		publicGroupMap[newpg.ID] = newpg
 	}
 
 	//initPublicGroup()
@@ -640,7 +617,7 @@ func updatePublicGroup(pg *group) error {
 		return err
 	}
 
-	if p, ok := getPublicGroup(pg.ID); ok {
+	if p, ok := publicGroupMap[pg.ID]; ok {
 
 		p.Name = pg.Name
 
@@ -678,11 +655,11 @@ func deletePublicGroup(pg *group) error {
 		return err
 	}
 
-	if p, ok := getPublicGroup(pg.ID); ok {
+	if p, ok := publicGroupMap[pg.ID]; ok {
 		p.stopMixPCM()
 	}
 
-	deletePublicGroupByID(pg.ID)
+	delete(publicGroupMap, pg.ID)
 
 	return nil
 
@@ -692,7 +669,7 @@ func getGroupListForDevice(packet []byte) []byte {
 
 	grouplist := make([]minigroup, 0)
 
-	for _, v := range getPublicGroupSnapshot() {
+	for _, v := range publicGroupMap {
 
 		g := minigroup{
 			ID:              v.ID,

@@ -119,7 +119,7 @@ func (p *Server) Start() error {
 
 		devMapStore(p.OwerCallsign+"-200", dev)
 
-		if p, ok := getPublicGroup(0); ok {
+		if p, ok := publicGroupMap[0]; ok {
 
 			p.devMap[dev.ID] = dev
 
@@ -280,7 +280,7 @@ func GetServer(id int) (server *Server) {
 		if err == sql.ErrNoRows {
 			log.Printf("No record found with ID %d", id)
 		} else {
-			log.Printf("Failed to query device: %v", err)
+			log.Fatalf("Failed to query device: %v", err)
 		}
 		return
 	}

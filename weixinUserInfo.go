@@ -6,6 +6,9 @@ import (
 	"log"
 	"strconv"
 	"time"
+
+	"github.com/lib/pq"
+	//_ "github.com/lib/pq"
 )
 
 type wxUserInfo struct {
@@ -14,7 +17,7 @@ type wxUserInfo struct {
 	MasterSchname  string         `json:"master_schname" db:"master_schname"`
 	SchoolID       int            `json:"school_id" db:"school_id"`
 	SchoolName     string         `json:"school_name" db:"school_name"`
-	SchList        []string `json:"sch_list" db:"sch_list"`
+	SchList        pq.StringArray `json:"sch_list" db:"sch_list"`
 	ServerURL      string         `json:"server_url" db:"server_url"`
 	ISHAM          bool           `json:"is_HAM" db:"is_HAM"`
 	Phone          string         `json:"phone" db:"phone"`
@@ -35,7 +38,7 @@ type wxUserInfo struct {
 	Unionid        string         `json:"unionid" db:"unionid"`
 	Remark         string         `json:"remark" db:"remark"`
 	Groupid        int            `json:"groupid" db:"groupid"`
-	TagidList      []string `json:"tagid_list" db:"tagid_list"`
+	TagidList      pq.StringArray `json:"tagid_list" db:"tagid_list"`
 	SubscribeScene string         `json:"subscribe_scene" db:"subscribe_scene"`
 	QRscene        int            `json:"qr_scene" db:"qr_scene"`
 	QRsceneStr     string         `json:"qr_scene_str" db:"qr_scene_str"`

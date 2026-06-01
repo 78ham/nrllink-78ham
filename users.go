@@ -69,8 +69,7 @@ func (j *jsonapi) httpUserAllList(w http.ResponseWriter, req *http.Request) {
 	var emplist []userinfo
 	var total int
 
-	wh, _, p, sort := queryToWhere("", *stb)
-	emplist, total = selectuser(wh, p, sort)
+	emplist, total = selectuser(queryToWhere("", *stb))
 
 	rescode, _ := jsonextra.Marshal(emplist)
 
@@ -110,8 +109,7 @@ func (j *jsonapi) httpUserList(w http.ResponseWriter, req *http.Request) {
 	//stb.CurrentArea = strconv.Itoa(u.CurrentArea)
 	//员工漫游修改位常驻
 
-	wh, _, p, sort := queryToWhere("", *stb)
-	emplist, total := selectuser(wh, p, sort)
+	emplist, total := selectuser(queryToWhere("", *stb))
 
 	//emplist = selectuser()
 
@@ -431,6 +429,7 @@ func (j *jsonapi) httpUpdateUserPassword(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
+	clearMustChangePwd(stb.ID)
 	addOperatorLog(stb.String(), "修改密码成功", u)
 
 	w.Write([]byte(`{"code":20000,"data":{"message":"密码更新成功"}}`))
@@ -683,9 +682,25 @@ func (j *jsonapi) httpUserLogin(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		res := &tokenrescode{Code: 20000,
-			Data:    resdata{Token: s},
-			Message: "login ok"}
+		mustChangePwd := false
+		if user, err := getuser(stb.Username); err == nil && user.Routes == MustChangePwdFlag {
+			mustChangePwd = true
+		}
+
+		type loginData struct {
+			Token         string `json:"token"`
+			MustChangePwd bool   `json:"must_change_pwd"`
+		}
+
+		res := &struct {
+			Code    int       `json:"code"`
+			Data    loginData `json:"data"`
+			Message string    `json:"message"`
+		}{
+			Code:    20000,
+			Data:    loginData{Token: s, MustChangePwd: mustChangePwd},
+			Message: "login ok",
+		}
 		rescode, _ := jsonextra.Marshal(res)
 		w.Write(rescode)
 
@@ -731,10 +746,13 @@ func (j *jsonapi) httpUserInfo(w http.ResponseWriter, req *http.Request) {
 
 	u.Routes = getRoleByKey(u.Roles[0]).Routes
 
+	mustChangePwd := u.Routes == MustChangePwdFlag
+
 	rescode, _ := jsonextra.Marshal(struct {
 		*userinfo
 		BillingEnabled bool `json:"billing_enabled"`
-	}{u, billingEnabled()})
+		MustChangePwd  bool `json:"must_change_pwd"`
+	}{u, billingEnabled(), mustChangePwd})
 
 	respone := fmt.Sprintf(`{"code":20000,"data":%s}`, rescode)
 

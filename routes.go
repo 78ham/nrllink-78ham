@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -34,10 +35,17 @@ func getRoutes() *routes {
 }
 
 func setRoutes(route string) {
-	_, err := db.Exec("UPDATE routes SET routes=?", route)
+
+	r := &routes{}
+
+	query := fmt.Sprintf("update  routes  set routes=%v", route)
+
+	row := db.QueryRow(query)
+	err := row.Scan(r)
 	if err != nil {
-		log.Println("save routes err:", err)
+		log.Println("save routes err:", err, r)
 	}
+
 }
 
 func (j *jsonapi) httpGetRoutes(w http.ResponseWriter, req *http.Request) {
@@ -56,7 +64,8 @@ func (j *jsonapi) httpGetRoutes(w http.ResponseWriter, req *http.Request) {
 	// r := responseinfo{Code: 20000, Data: getRoutes()}
 	// rescode, _ := jsonextra.Marshal(r)
 	// w.Write(rescode)
-	writeJSONResponseItem(w, jsoniter.RawMessage(getRoutes().Routes))
+	res := fmt.Sprintf(`{"code":20000,"data":%v}`, string(getRoutes().Routes))
+	w.Write([]byte(res))
 
 }
 func (j *jsonapi) httpSetRoutes(w http.ResponseWriter, req *http.Request) {
@@ -75,7 +84,7 @@ func (j *jsonapi) httpSetRoutes(w http.ResponseWriter, req *http.Request) {
 
 	result, _ := io.ReadAll(req.Body)
 
-	req.Body.Close()
+	// req.Body.Close()
 
 	// stb := &routes{}
 	// err := jsonextra.Unmarshal(result, &stb)

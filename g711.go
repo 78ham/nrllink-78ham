@@ -99,3 +99,12 @@ func G711Decode(encodedData []byte) []int {
 	}
 	return decoded
 }
+
+// int16ToInt 将 []int16 转为 []int（用于 G711Encode）
+func int16ToInt(samples []int16) []int {
+	out := make([]int, len(samples))
+	for i, s := range samples {
+		out[i] = int(s)
+	}
+	return out
+}
