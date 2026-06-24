@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -49,9 +48,10 @@ func (j *jsonapi) httpUserAllList(w http.ResponseWriter, req *http.Request) {
 		return
 
 	}
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -88,9 +88,10 @@ func (j *jsonapi) httpUserList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -260,9 +261,10 @@ func (j *jsonapi) httpUpdateUser(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &userinfo{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -311,8 +313,10 @@ func (j *jsonapi) httpUpdateUserProfile(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &userinfo{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -358,9 +362,10 @@ func (j *jsonapi) httpUpdateUserAvatar(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &userinfo{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -395,9 +400,10 @@ func (j *jsonapi) httpUpdateUserPassword(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &userinfo{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -450,9 +456,10 @@ func (j *jsonapi) httpAddUser(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &userinfo{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -490,9 +497,10 @@ func (j *jsonapi) httpDeleteUser(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &userinfo{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -564,11 +572,12 @@ func (j *jsonapi) httpRole(w http.ResponseWriter, req *http.Request) {
 
 	key := strings.TrimSpace(req.Form.Get("key"))
 
-	result, _ := io.ReadAll(req.Body)
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	//	fmt.Println("role result:", req.Method, key, string(result))
-
-	req.Body.Close()
 
 	// fmt.Println("stb:", stb)
 
@@ -661,9 +670,11 @@ func (j *jsonapi) httpUserLogin(w http.ResponseWriter, req *http.Request) {
 
 	sethttphead(w)
 
-	result, _ := io.ReadAll(req.Body)
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 	//fmt.Println("adminlogin result:", string(result))
-	req.Body.Close()
 	stb := &loginreq{}
 	err := jsonextra.Unmarshal(result, &stb)
 	//fmt.Println("adminlogin username and password:", stb.Username, stb.Password)
@@ -744,7 +755,9 @@ func (j *jsonapi) httpUserInfo(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	u.Routes = getRoleByKey(u.Roles[0]).Routes
+	if len(u.Roles) > 0 {
+		u.Routes = getRoleByKey(u.Roles[0]).Routes
+	}
 
 	mustChangePwd := u.Routes == MustChangePwdFlag
 
@@ -774,9 +787,11 @@ func (j *jsonapi) httpoplogout(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 	//fmt.Println("adminlogin result:", string(result))
-	req.Body.Close()
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)

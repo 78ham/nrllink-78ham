@@ -385,9 +385,10 @@ type MPUserInfo struct {
 
 func (j *jsonapi) httpWXMsgReturn(w http.ResponseWriter, req *http.Request) {
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	//fmt.Println("weixin return msg:", result)
 
@@ -708,6 +709,7 @@ func setWeixinMenu(AccessToken, WeiXinMenu string) error {
 		return err
 
 	}
+	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -756,6 +758,7 @@ func getWeixinUserInfo(openid string) (*wxUserInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -855,7 +858,7 @@ func pushCustomMsg(accessToken, toUser, msg string) error {
 	if err != nil {
 		return err
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
 
 	return nil
 }
@@ -974,14 +977,13 @@ func SendWeixin(accessToken string, data interface{}) (*WXRespone, error) {
 		log.Println("get wxmsg http resp  err:", err)
 		return nil, err
 	}
+	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Println("get wxmsg http resp body err:", err)
 		return nil, err
 	}
-	defer postReq.Body.Close()
-
 	r := &WXRespone{}
 
 	err = jsonextra.Unmarshal(body, &r)
@@ -999,9 +1001,10 @@ func SendWeixin(accessToken string, data interface{}) (*WXRespone, error) {
 func (j *jsonapi) httpMPPhoneCode(w http.ResponseWriter, req *http.Request) {
 	sethttphead(w)
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	e := &MPUserInfo{}
 	err := jsonextra.Unmarshal(result, &e)
@@ -1067,9 +1070,10 @@ func (j *jsonapi) httpPhoneCode(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	e := &phonecode{}
 	err = jsonextra.Unmarshal(result, &e)
@@ -1125,9 +1129,10 @@ func (j *jsonapi) httpgetWeiXinMsg(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	//list := make([]*wxmsg, 0)
 

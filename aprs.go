@@ -131,8 +131,9 @@ func (a *Aprs) sendAprsPosition() error {
 		a.Status = "位置已发送"
 	}
 
+	stats := totalStatsSnapshot()
 	aprsPacket2 := a.formatAprsPackettwo(conf.SystemInfo.PlatformName, conf.APRS.CallSign, conf.APRS.SSID,
-		totalstats.OnlineDevNumber, devMapLen())
+		stats.OnlineDevNumber, devMapLen())
 
 	err = a.tcpClient.Send(aprsPacket2)
 	//fmt.Printf("APRS:发送附加信息: %s", aprsPacket2)

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -78,9 +77,10 @@ func checkHttpRequest(w http.ResponseWriter, req *http.Request, rolelist []strin
 		return nil, nil, respData
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err := jsonextra.Unmarshal(result, &stb)

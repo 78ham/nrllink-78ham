@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -17,9 +16,10 @@ func (j *jsonapi) httpDevicesList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -68,9 +68,10 @@ func (j *jsonapi) httpDeviceList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -109,7 +110,9 @@ func (j *jsonapi) httpDeviceList(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	totalstats.OnlineDevNumber = onlineDeviceTotal
+	updateTotalStats(func(stats *totalStats) {
+		stats.OnlineDevNumber = onlineDeviceTotal
+	})
 
 	rescode, _ := jsonextra.Marshal(devicelist)
 
@@ -128,9 +131,10 @@ func (j *jsonapi) httpGroupDeviceList(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -154,7 +158,7 @@ func (j *jsonapi) httpGroupDeviceList(w http.ResponseWriter, req *http.Request) 
 
 	if grolupid < 999 && grolupid > 0 {
 		if user, okok := userlist.Load(u.CallSign); okok {
-			for _, v := range user.(*userinfo).Groups[grolupid].devMap {
+			for _, v := range user.(*userinfo).Groups[grolupid].devSnapshot() {
 				if v.ISOnline {
 					onlinedevlist = append(onlinedevlist, v)
 				} else {
@@ -167,9 +171,9 @@ func (j *jsonapi) httpGroupDeviceList(w http.ResponseWriter, req *http.Request) 
 
 	} else {
 
-		if g, ok := publicGroupMap[grolupid]; ok {
+		if g, ok := publicGroupLoad(grolupid); ok {
 
-			for _, v := range g.devMap {
+			for _, v := range g.devSnapshot() {
 				if v.ISOnline {
 					onlinedevlist = append(onlinedevlist, v)
 				} else {
@@ -221,9 +225,10 @@ func (j *jsonapi) httpDevice(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -251,9 +256,10 @@ func (j *jsonapi) httpDeviceQTH(w http.ResponseWriter, req *http.Request) {
 	// 	return
 	// }
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err := jsonextra.Unmarshal(result, &stb)
@@ -342,9 +348,10 @@ func (j *jsonapi) httpUpdateDevice(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &deviceInfo{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -412,9 +419,10 @@ func (j *jsonapi) httpDeleteDevice(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &deviceInfo{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -458,9 +466,10 @@ func (j *jsonapi) httpChangeDeviceGroupNRL(w http.ResponseWriter, req *http.Requ
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &deviceInfo{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -511,9 +520,10 @@ func (j *jsonapi) httpRoomList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -541,9 +551,10 @@ func (j *jsonapi) httpDeviceAT(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &ATcommand{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -604,9 +615,10 @@ func (j *jsonapi) httpQueryDeviceParm(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &deviceInfo{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -653,7 +665,11 @@ func (j *jsonapi) httpChangeDeviceParm(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	req.ParseForm()
+	if err := req.ParseForm(); err != nil {
+		log.Println("device parm parse form err:", err)
+		w.Write(ResParmErr)
+		return
+	}
 
 	fmt.Println("REQ:", req.Form)
 
@@ -662,8 +678,8 @@ func (j *jsonapi) httpChangeDeviceParm(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	callsign := req.Form["callsign"][0]
-	ssid := req.Form["ssid"][0]
+	callsign := req.Form.Get("callsign")
+	ssid := req.Form.Get("ssid")
 	callsignssid := callsign + "-" + ssid
 
 	if !checkrole(u, []string{"admin"}) && u.CallSign != callsign {
@@ -779,8 +795,17 @@ outerLoop:
 			break outerLoop
 
 		case "local_ipaddr", "gateway", "netmask", "dns_ipaddr", "dest_domainname":
+			localIPAddr := req.Form.Get("local_ipaddr")
+			gateway := req.Form.Get("gateway")
+			netmask := req.Form.Get("netmask")
+			dnsIPAddr := req.Form.Get("dns_ipaddr")
+			destDomainName := req.Form.Get("dest_domainname")
+			if localIPAddr == "" || gateway == "" || netmask == "" || dnsIPAddr == "" || destDomainName == "" {
+				w.Write(ResParmErr)
+				return
+			}
 
-			ipparm := ipparm{32, req.Form["local_ipaddr"][0], 36, req.Form["gateway"][0], 40, req.Form["netmask"][0], 44, req.Form["dns_ipaddr"][0], 80, req.Form["dest_domainname"][0]}
+			ipparm := ipparm{32, localIPAddr, 36, gateway, 40, netmask, 44, dnsIPAddr, 80, destDomainName}
 			_, err := changeDeviceIPParm(callsignssid, ipparm)
 			if err != nil {
 				w.Write([]byte(`{"code":20001,"data":{"message":"改变IP失败,IP不正确"}}`))
@@ -877,9 +902,10 @@ func (j *jsonapi) httpChange1W(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &control{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -922,9 +948,10 @@ func (j *jsonapi) httpChange2W(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &control{}
 	err = jsonextra.Unmarshal(result, &stb)

@@ -41,6 +41,7 @@ func selectrelay(w string, p string, sort string) ([]*relay, int) {
 		return nil, 0
 
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		r := &relay{}
@@ -50,6 +51,10 @@ func selectrelay(w string, p string, sort string) ([]*relay, int) {
 			continue
 		}
 		emp = append(emp, r)
+	}
+	if err = rows.Err(); err != nil {
+		log.Println("select relay rows err:", err, query)
+		return nil, 0
 	}
 
 	var t int
@@ -71,7 +76,7 @@ func selectrelay(w string, p string, sort string) ([]*relay, int) {
 func addrelay(s *relay) error {
 
 	//	fmt.Println("user:", e)
-	query := `INSERT INTO relay (name,up_freq,down_freq,send_ctss,recive_ctss,ower_callsign,status,note,create_time,update_time) 
+	query := `INSERT INTO relay (name,up_freq,down_freq,send_ctss,recive_ctss,ower_callsign,status,note,create_time,update_time)
 	VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) `
 
 	resault, err := db.Exec(query,

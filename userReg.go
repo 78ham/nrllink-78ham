@@ -20,9 +20,10 @@ func (j *jsonapi) httpRegisterList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -58,7 +59,10 @@ func (j *jsonapi) httpRegisterImage(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	result, _ := io.ReadAll(req.Body)
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -242,9 +246,10 @@ func (j *jsonapi) httpAddReg(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &reguser{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -288,9 +293,10 @@ func (j *jsonapi) httpUpdateReg(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &reguser{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -329,9 +335,10 @@ func (j *jsonapi) httpDeleteRegUser(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &reguser{}
 	err = jsonextra.Unmarshal(result, &stb)

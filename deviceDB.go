@@ -113,7 +113,7 @@ func checkdeviceOnline() {
 		t := time.Now()
 		onlineDeviceTotal := 0
 
-		for _, vv := range publicGroupMap {
+		for _, vv := range publicGroupSnapshot() {
 
 			change := false
 			vv.OnlineDevNumber = 0
@@ -152,7 +152,7 @@ func checkdeviceOnline() {
 			}
 			vv.connPool.mu.Unlock()
 
-			vv.TotalDevNumber = len(vv.devMap)
+			vv.TotalDevNumber = vv.devLen()
 
 			onlineDeviceTotal = onlineDeviceTotal + vv.OnlineDevNumber
 
@@ -189,7 +189,7 @@ func checkdeviceOnline() {
 				vv.connPool.rebuildListLocked()
 				vv.connPool.mu.Unlock()
 
-				vv.TotalDevNumber = len(vv.devMap)
+				vv.TotalDevNumber = vv.devLen()
 				onlineDeviceTotal = onlineDeviceTotal + vv.OnlineDevNumber
 
 			}
@@ -197,9 +197,12 @@ func checkdeviceOnline() {
 
 		})
 
-		prevOnlineDeviceTotal := totalstats.OnlineDevNumber
 		onlineDevMapStore(onlineMap)
-		totalstats.OnlineDevNumber = onlineDeviceTotal
+		prevOnlineDeviceTotal := 0
+		updateTotalStats(func(stats *totalStats) {
+			prevOnlineDeviceTotal = stats.OnlineDevNumber
+			stats.OnlineDevNumber = onlineDeviceTotal
+		})
 		if prevOnlineDeviceTotal == 0 && onlineDeviceTotal > 0 {
 			go func() {
 				if err := reportCurrentServerStatus(); err != nil {
@@ -262,9 +265,9 @@ func initAllDevList() {
 
 		devMapStore(callsignSSID, dev)
 
-		if kk, ok := publicGroupMap[dev.GroupID]; ok {
+		if kk, ok := publicGroupLoad(dev.GroupID); ok {
 
-			kk.devMap[dev.ID] = dev
+			kk.devStore(dev)
 			kk.DevList = append(kk.DevList, dev.ID)
 
 		} else {
@@ -273,8 +276,8 @@ func initAllDevList() {
 
 				dev.GroupID = 0
 
-				if kkk, ok := publicGroupMap[dev.GroupID]; ok {
-					kkk.devMap[dev.ID] = dev
+				if kkk, ok := publicGroupLoad(dev.GroupID); ok {
+					kkk.devStore(dev)
 					kkk.DevList = append(kkk.DevList, dev.ID)
 
 				}
@@ -282,15 +285,15 @@ func initAllDevList() {
 			} else {
 				if user, okok := userlist.Load(dev.CallSign); okok {
 					gp := user.(*userinfo).Groups[dev.GroupID]
-					gp.devMap[dev.ID] = dev
+					gp.devStore(dev)
 					gp.DevList = append(gp.DevList, dev.ID)
 
 				} else {
 
 					dev.GroupID = 0
 
-					if kkk, ok := publicGroupMap[dev.GroupID]; ok {
-						kkk.devMap[dev.ID] = dev
+					if kkk, ok := publicGroupLoad(dev.GroupID); ok {
+						kkk.devStore(dev)
 						kkk.DevList = append(kkk.DevList, dev.ID)
 
 					}
@@ -840,9 +843,11 @@ func delDevice(dev *deviceInfo) error {
 
 	if d, ok := devMapLoad(dev.CallSignSSID); ok {
 		devMapDelete(dev.CallSignSSID)
-		delete(publicGroupMap[dev.GroupID].devMap, dev.ID)
-		if d.udpAddr != nil {
-			publicGroupMap[dev.GroupID].connPool.removeDevice(d.udpAddr.String())
+		if g, ok := publicGroupLoad(dev.GroupID); ok {
+			g.devDelete(dev.ID)
+			if d.udpAddr != nil {
+				g.connPool.removeDevice(d.udpAddr.String())
+			}
 		}
 	}
 
@@ -877,11 +882,11 @@ func updateDevice(e *deviceInfo) error {
 
 			if d.DevModel == 255 {
 				d.GroupID = 999
-				return errors.New("255设备不能移出999�?)
+				return errors.New("device model 255 cannot leave group 999")
 			}
 
 			if d.DevModel == 200 && e.GroupID == 999 {
-				return errors.New("200设备不能加入255�?)
+				return errors.New("device model 200 cannot join group 999")
 			}
 
 			_, err := changeDevGroup(d, e.GroupID)

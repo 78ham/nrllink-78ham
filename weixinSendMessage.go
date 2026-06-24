@@ -159,14 +159,13 @@ func GetWXTemplateID(accessToken string, data getMsgID) (string, error) {
 		log.Println("get wxmsg template id   resp  err:", err)
 		return "", err
 	}
+	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Println("get wxmsg   template id  body err:", err)
 		return "", err
 	}
-	defer postReq.Body.Close()
-
 	r := &WXRespone{}
 
 	err = jsonextra.Unmarshal(body, &r)
@@ -254,6 +253,7 @@ func DelWXTemplate(AccessToken, templateID string) error {
 		return err
 
 	}
+	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 
@@ -76,9 +75,10 @@ func (j *jsonapi) httpSetRoutes(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	// req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	// stb := &routes{}
 	// err := jsonextra.Unmarshal(result, &stb)

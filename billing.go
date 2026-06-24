@@ -555,8 +555,10 @@ func (j *jsonapi) handleBillingPackageWrite(w http.ResponseWriter, req *http.Req
 		w.Write(ResRightErr)
 		return
 	}
-	body, _ := io.ReadAll(req.Body)
-	req.Body.Close()
+	body, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 	p := &billingPackage{}
 	if err := jsonextra.Unmarshal(body, p); err != nil {
 		writeJSONResponse(w, &Response{20001, "套餐参数错误", nil})
@@ -588,8 +590,10 @@ func (j *jsonapi) httpBillingOrderCreate(w http.ResponseWriter, req *http.Reques
 		writeJSONResponse(w, &Response{20001, "收费功能未开启", nil})
 		return
 	}
-	body, _ := io.ReadAll(req.Body)
-	req.Body.Close()
+	body, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 	reqData := &billingOrderReq{}
 	if err := jsonextra.Unmarshal(body, reqData); err != nil {
 		writeJSONResponse(w, &Response{20001, "订单参数错误", nil})
@@ -614,8 +618,10 @@ func (j *jsonapi) httpBillingOrderQuery(w http.ResponseWriter, req *http.Request
 	if err != nil {
 		return
 	}
-	body, _ := io.ReadAll(req.Body)
-	req.Body.Close()
+	body, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 	reqData := &billingOrderReq{}
 	if err := jsonextra.Unmarshal(body, reqData); err != nil {
 		writeJSONResponse(w, &Response{20001, "订单参数错误", nil})
@@ -640,8 +646,12 @@ func (j *jsonapi) httpBillingOrderQuery(w http.ResponseWriter, req *http.Request
 
 func (j *jsonapi) httpBillingWechatNotify(w http.ResponseWriter, req *http.Request) {
 	sethttphead(w)
-	body, _ := io.ReadAll(req.Body)
-	req.Body.Close()
+	body, err := readRequestBodyRaw(req)
+	if err != nil {
+		log.Println("billing notify read body failed:", err)
+		writeWechatNotifyResult(w, "FAIL", "read request body failed")
+		return
+	}
 	var notify struct {
 		Resource struct {
 			Algorithm      string `json:"algorithm"`

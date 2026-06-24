@@ -88,6 +88,7 @@ func getRoles(query string) []*role {
 		return nil
 
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		r := &role{}
@@ -179,6 +180,11 @@ func selectuser(w string, p string, sort string) ([]userinfo, int) {
 	//fmt.Println(query)
 
 	rows, err := db.Query(query)
+	if err != nil {
+		log.Println("查询用户列表错误: ", err, "\n", query)
+		return nil, 0
+	}
+	defer rows.Close()
 
 	for rows.Next() {
 
@@ -196,12 +202,6 @@ func selectuser(w string, p string, sort string) ([]userinfo, int) {
 		}
 		r.Roles = strings.Split(roles, ",")
 		emp = append(emp, r)
-	}
-
-	if err != nil {
-		log.Println("查询用户列表错误: ", err, "\n", query)
-		return nil, 0
-
 	}
 
 	var t int
@@ -293,6 +293,7 @@ func getEmpListByRole(role string) ([]userinfo, int) {
 		return nil, 0
 
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 
@@ -449,6 +450,7 @@ func addUser(e *userinfo) error {
 		log.Println("add user failed 1 , ", err, '\n', query)
 		return err
 	}
+	defer stmt.Close()
 
 	//	e.Avatar = "https://wpimg.wallstcn.com/f778738c-e4f8-4870-b634-56703b4acafe.gif"
 	e.Avatar = conf.WeiXin.AvatarURL

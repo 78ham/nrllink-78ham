@@ -119,9 +119,9 @@ func (p *Server) Start() error {
 
 		devMapStore(p.OwerCallsign+"-200", dev)
 
-		if p, ok := publicGroupMap[0]; ok {
+		if p, ok := publicGroupLoad(0); ok {
 
-			p.devMap[dev.ID] = dev
+			p.devStore(dev)
 
 		}
 
@@ -176,19 +176,21 @@ func queryServers() (serverlist []*Server) {
 		udp_port,
 		dns_name,
 		server_type,
-		
+
 		status,
 		ower_id,
 		ower_callsign,
 		create_time,
-		update_time 
+		update_time
 	FROM servers`
 
 	rows, err := db.Query(query)
 
 	if err != nil {
 		log.Println("query all server list  err:", err)
+		return serverlist
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 
@@ -215,6 +217,7 @@ func queryServers() (serverlist []*Server) {
 			&pg.UpdateTime)
 		if err != nil {
 			log.Println("query  server rows err:", err)
+			continue
 		}
 
 		// if pg.Status == 1 {
@@ -226,6 +229,10 @@ func queryServers() (serverlist []*Server) {
 
 		serverlist = append(serverlist, pg)
 
+	}
+	if err = rows.Err(); err != nil {
+		log.Println("query server rows err:", err)
+		return serverlist
 	}
 
 	return serverlist
@@ -247,12 +254,12 @@ func GetServer(id int) (server *Server) {
 		udp_port,
 		dns_name,
 		server_type,
-		
+
 		status,
 		ower_id,
 		ower_callsign,
 		create_time,
-		update_time 
+		update_time
 	FROM servers where id=?`
 
 	pg := &Server{}
@@ -280,7 +287,7 @@ func GetServer(id int) (server *Server) {
 		if err == sql.ErrNoRows {
 			log.Printf("No record found with ID %d", id)
 		} else {
-			log.Fatalf("Failed to query device: %v", err)
+			log.Printf("Failed to query server: %v", err)
 		}
 		return
 	}
@@ -344,7 +351,7 @@ func addServers(s *Server) error {
 
 	//	fmt.Println("user:", e)
 	query := `INSERT INTO servers (name,join_key,cpu_type,mem_size,input_rate,output_rate,netcard,
-		ip_type,ip_addr,udp_port,dns_name,server_type,ower_id,ower_callsign,status,note,create_time,update_time) 
+		ip_type,ip_addr,udp_port,dns_name,server_type,ower_id,ower_callsign,status,note,create_time,update_time)
 	VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP) `
 
 	resault, err := db.Exec(query,

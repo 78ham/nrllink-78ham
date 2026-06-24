@@ -36,7 +36,9 @@ func initAllUserList() {
 
 	if err != nil {
 		log.Println("query all user list  err:", err)
+		return
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		user := &userinfo{}

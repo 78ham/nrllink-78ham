@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 )
@@ -29,9 +28,10 @@ func (j *jsonapi) httpOperatorLogList(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	//list := make([]OperatorLog, 0)
 	var total = 0

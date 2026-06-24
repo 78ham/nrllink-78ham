@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 )
@@ -18,9 +17,10 @@ func (j *jsonapi) httpGetRelayList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 
@@ -51,9 +51,10 @@ func (j *jsonapi) httpUpdaterelay(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &relay{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -92,9 +93,10 @@ func (j *jsonapi) httpAddrelay(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &relay{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -134,9 +136,10 @@ func (j *jsonapi) httpDeleterelay(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &relay{}
 	err = jsonextra.Unmarshal(result, &stb)

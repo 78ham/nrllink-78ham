@@ -46,6 +46,7 @@ func createRegUser(e *reguser) error {
 		log.Println("add reg user failed 1 , ", err, '\n', query)
 		return err
 	}
+	defer stmt.Close()
 
 	res, err := stmt.Exec(e.CallSign, e.Name, e.Phone, e.Sex, e.Address, e.Birthday, e.Mail, password, e.OpCertPath, e.LicensePath, e.Status, e.Note)
 	if err != nil {
@@ -98,6 +99,7 @@ func selectReguser(w string, p string, sort string) ([]reguser, int) {
 		return nil, 0
 
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 
@@ -116,11 +118,9 @@ func selectReguser(w string, p string, sort string) ([]reguser, int) {
 
 		emp = append(emp, r)
 	}
-
-	if err != nil {
-		log.Println("查询注册用户列表错误: ", err, "\n", query)
+	if err = rows.Err(); err != nil {
+		log.Println("select registers rows err:", err, "\n", query)
 		return nil, 0
-
 	}
 
 	var t int
@@ -206,6 +206,7 @@ func addUserReg(ctx context.Context, u *reguser) error {
 		log.Println("add user failed 1 , ", err, '\n', query)
 		return err
 	}
+	defer stmt.Close()
 
 	e.Avatar = conf.WeiXin.AvatarURL
 

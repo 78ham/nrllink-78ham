@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"sort"
@@ -18,10 +17,7 @@ type groupDetail struct {
 }
 
 func newGroupDetail(g *group) groupDetail {
-	devlist := make([]*deviceInfo, 0, len(g.devMap))
-	for _, dev := range g.devMap {
-		devlist = append(devlist, dev)
-	}
+	devlist := g.devSnapshot()
 
 	sort.Slice(devlist, func(i, j int) bool {
 		return devlist[i].ID < devlist[j].ID
@@ -41,9 +37,10 @@ func (j *jsonapi) httpPublicGroupList(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -56,7 +53,7 @@ func (j *jsonapi) httpPublicGroupList(w http.ResponseWriter, req *http.Request) 
 
 	groupmap := make(map[int]*group)
 
-	for k, v := range publicGroupMap {
+	for k, v := range publicGroupSnapshot() {
 
 		groupmap[k] = v
 	}
@@ -89,7 +86,7 @@ func (j *jsonapi) httpAllGroupListNRL(w http.ResponseWriter, req *http.Request) 
 
 	str := ""
 
-	for _, v := range publicGroupMap {
+	for _, v := range publicGroupSnapshot() {
 		str = str + fmt.Sprintf("%v,%v\n", v.ID, v.Name)
 
 	}
@@ -106,9 +103,10 @@ func (j *jsonapi) httpGetGroup(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -133,7 +131,7 @@ func (j *jsonapi) httpGetGroup(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-	} else if g, ok := publicGroupMap[groupid]; ok {
+	} else if g, ok := publicGroupLoad(groupid); ok {
 		writeJSONResponseItem(w, newGroupDetail(g))
 		return
 
@@ -150,9 +148,10 @@ func (j *jsonapi) httpGetGroupList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -183,9 +182,10 @@ func (j *jsonapi) httpUpdateGroup(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &group{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -224,9 +224,10 @@ func (j *jsonapi) httpAddGroup(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &group{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -266,9 +267,10 @@ func (j *jsonapi) httpDeleteGroup(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &group{}
 	err = jsonextra.Unmarshal(result, &stb)

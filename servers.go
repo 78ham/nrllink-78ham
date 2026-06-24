@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 )
@@ -18,9 +17,10 @@ func (j *jsonapi) httpServersList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &query{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -64,9 +64,10 @@ func (j *jsonapi) httpUpdateServer(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &Server{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -105,9 +106,10 @@ func (j *jsonapi) httpAddServer(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &Server{}
 	err = jsonextra.Unmarshal(result, &stb)
@@ -148,9 +150,10 @@ func (j *jsonapi) httpDeleteServer(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	result, _ := io.ReadAll(req.Body)
-
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	stb := &Server{}
 	err = jsonextra.Unmarshal(result, &stb)

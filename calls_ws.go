@@ -107,6 +107,7 @@ func wsCallAudioFrameSize() int {
 	}
 	return sr * 20 / 1000 // MixSampleRate * 20ms
 }
+
 const wsCallMaxBufferedBytes = 500 * 50
 const wsCallClientTimeout = 25 * time.Second
 
@@ -156,8 +157,9 @@ func (h *wsCallHub) totalSubscriptions() int {
 }
 
 func currentOnlineDeviceCount() int {
-	if totalstats.OnlineDevNumber > 0 {
-		return totalstats.OnlineDevNumber
+	stats := totalStatsSnapshot()
+	if stats.OnlineDevNumber > 0 {
+		return stats.OnlineDevNumber
 	}
 	return onlineDevMapLen()
 }
@@ -451,9 +453,9 @@ func canUserAccessGroup(u *userinfo, gp *group) bool {
 }
 
 func accessibleRooms(u *userinfo) map[string]*group {
-	rooms := make(map[string]*group, len(publicGroupMap)+3)
+	rooms := make(map[string]*group, publicGroupLen()+3)
 
-	for _, gp := range publicGroupMap {
+	for _, gp := range publicGroupSnapshot() {
 		if !canUserAccessGroup(u, gp) {
 			continue
 		}
@@ -912,8 +914,8 @@ func (c *wsCallClient) nextMixedFrame() []byte {
 			continue
 		}
 
-		codecType := buf[0]    // 第1字节为编码类型
-		audioData := buf[1:]    // 后续为音频数据
+		codecType := buf[0]  // 第1字节为编码类型
+		audioData := buf[1:] // 后续为音频数据
 
 		if firstFrame == nil {
 			firstFrame = make([]byte, 1+wsCallAudioFrameSize())

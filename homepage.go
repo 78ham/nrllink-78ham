@@ -76,8 +76,10 @@ func (j *jsonapi) httpAdminHomepageSectionsUpdate(w http.ResponseWriter, req *ht
 		w.Write(ResRightErr)
 		return
 	}
-	result, _ := io.ReadAll(req.Body)
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	section := &HomepageSection{}
 	if err := jsonextra.Unmarshal(result, section); err != nil {
@@ -103,8 +105,10 @@ func (j *jsonapi) httpAdminHomepageSectionsDelete(w http.ResponseWriter, req *ht
 		w.Write(ResRightErr)
 		return
 	}
-	result, _ := io.ReadAll(req.Body)
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	section := &HomepageSection{}
 	if err := jsonextra.Unmarshal(result, section); err != nil {
@@ -129,8 +133,10 @@ func (j *jsonapi) httpAdminHomepageAnnouncementsCreate(w http.ResponseWriter, re
 		w.Write(ResRightErr)
 		return
 	}
-	result, _ := io.ReadAll(req.Body)
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	ann := &HomepageAnnouncement{}
 	if err := jsonextra.Unmarshal(result, ann); err != nil {
@@ -155,8 +161,10 @@ func (j *jsonapi) httpAdminHomepageAnnouncementsUpdate(w http.ResponseWriter, re
 		w.Write(ResRightErr)
 		return
 	}
-	result, _ := io.ReadAll(req.Body)
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	ann := &HomepageAnnouncement{}
 	if err := jsonextra.Unmarshal(result, ann); err != nil {
@@ -181,8 +189,10 @@ func (j *jsonapi) httpAdminHomepageAnnouncementsDelete(w http.ResponseWriter, re
 		w.Write(ResRightErr)
 		return
 	}
-	result, _ := io.ReadAll(req.Body)
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	ann := &HomepageAnnouncement{}
 	if err := jsonextra.Unmarshal(result, ann); err != nil {
@@ -293,8 +303,10 @@ func (j *jsonapi) httpAdminHomepageImageDelete(w http.ResponseWriter, req *http.
 		w.Write(ResRightErr)
 		return
 	}
-	result, _ := io.ReadAll(req.Body)
-	req.Body.Close()
+	result, ok := readRequestBody(w, req)
+	if !ok {
+		return
+	}
 
 	img := &HomepageImage{}
 	if err := jsonextra.Unmarshal(result, img); err != nil {

@@ -142,11 +142,15 @@ func (a *APRSTV) GetNRL() {
 
 	conf.PlatformList = []Platformitem{}
 
-	totalstats.PlatformDevOnline = 0
-	totalstats.PlatformDevTotal = 0
+	platformDevOnline := 0
+	platformDevTotal := 0
 
 	if len(apiResponse.Data) == 0 {
 		conf.PlatformList = PlatformList
+		updateTotalStats(func(stats *totalStats) {
+			stats.PlatformDevOnline = 0
+			stats.PlatformDevTotal = 0
+		})
 		return
 	}
 
@@ -192,13 +196,17 @@ func (a *APRSTV) GetNRL() {
 			udpAddr: targetAddr,
 		}
 
-		totalstats.PlatformDevOnline = totalstats.PlatformDevOnline + online
-		totalstats.PlatformDevTotal = totalstats.PlatformDevTotal + total
+		platformDevOnline += online
+		platformDevTotal += total
 
 		conf.PlatformList = append(conf.PlatformList, p)
 
 		//fmt.Printf("name:%s, Ower:%s, host:%s, port:%s, online:%d, total:%d,\n", name, item.Scall, host, port, online, total)
 	}
+	updateTotalStats(func(stats *totalStats) {
+		stats.PlatformDevOnline = platformDevOnline
+		stats.PlatformDevTotal = platformDevTotal
+	})
 
 }
 
@@ -244,20 +252,27 @@ func (a *APRSTV) GetNRLStat() {
 	}
 
 	// 打印解析后的数据
+	platformTotals := totalStatsSnapshot()
 	for _, item := range apiResponse.Data {
 
 		switch item.Type {
 		case "NRLSRV":
-			totalstats.PlatformServerTotal = item.Total
+			platformTotals.PlatformServerTotal = item.Total
 		case "NRLBOX":
-			totalstats.PlatformBoxTotal = item.Total
+			platformTotals.PlatformBoxTotal = item.Total
 		case "NRLAPP":
-			totalstats.PlatformAppTotal = item.Total
+			platformTotals.PlatformAppTotal = item.Total
 		case "NRLMP":
-			totalstats.PlatformMPTotal = item.Total
+			platformTotals.PlatformMPTotal = item.Total
 		}
 		//fmt.Printf("%s,%d\n", item.Type, item.Total)
 	}
+	updateTotalStats(func(stats *totalStats) {
+		stats.PlatformServerTotal = platformTotals.PlatformServerTotal
+		stats.PlatformBoxTotal = platformTotals.PlatformBoxTotal
+		stats.PlatformAppTotal = platformTotals.PlatformAppTotal
+		stats.PlatformMPTotal = platformTotals.PlatformMPTotal
+	})
 }
 
 func findNRL() {

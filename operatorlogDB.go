@@ -24,7 +24,7 @@ func getOperatorLog(s string, p string) ([]*OperatorLog, int) {
 
 	loglist := []*OperatorLog{}
 
-	query := fmt.Sprintf(`SELECT id,datetime(timestamp, 'localtime'),content,event_type,operator,operator_id 
+	query := fmt.Sprintf(`SELECT id,datetime(timestamp, 'localtime'),content,event_type,operator,operator_id
 	FROM operator_log %v ORDER BY id DESC %v`, s, p)
 
 	rows, err := db.Query(query)
@@ -34,6 +34,7 @@ func getOperatorLog(s string, p string) ([]*OperatorLog, int) {
 		return nil, 0
 
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 
@@ -46,6 +47,10 @@ func getOperatorLog(s string, p string) ([]*OperatorLog, int) {
 		}
 		loglist = append(loglist, l)
 
+	}
+	if err = rows.Err(); err != nil {
+		log.Println("select operator_log rows err:", err, query)
+		return nil, 0
 	}
 
 	var t int

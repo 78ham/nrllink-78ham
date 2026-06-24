@@ -36,7 +36,7 @@ var mdcidmap sync.Map //key mdcid, value callsign
 var dmridmap sync.Map //key dmrid, value callsign
 
 var devCallsignSSIDMap = make(map[string]*deviceInfo, 1000) //key : callsign+ssid 在线设备列表
-var devMapMu sync.RWMutex                                    //保护 devCallsignSSIDMap 的并发读写
+var devMapMu sync.RWMutex                                   //保护 devCallsignSSIDMap 的并发读写
 
 var onlinedevMap = make(map[int]*deviceInfo, 1000) //所有设备列表
 var onlineDevMapMu sync.RWMutex                    //保护 onlinedevMap 的整体替换与读取
@@ -110,6 +110,13 @@ func onlineDevMapSnapshot() map[int]*deviceInfo {
 }
 
 var ServerMap = make(map[string]*deviceInfo) //呼号对应的服务器设备
+var serverMapMu sync.RWMutex
+
+func serverMapStore(callsign string, dev *deviceInfo) {
+	serverMapMu.Lock()
+	ServerMap[callsign] = dev
+	serverMapMu.Unlock()
+}
 
 var limitChan = make(chan bool, 1)
 
@@ -335,7 +342,9 @@ func udpProcess(conn *net.UDPConn) {
 			continue
 		}
 
-		totalstats.PacketNumber++
+		addTotalStats(func(stats *totalStats) {
+			stats.PacketNumber++
+		})
 
 		callsignSSID := getCallsignSSID(nrl.CallSign, nrl.SSID)
 
@@ -349,7 +358,10 @@ func udpProcess(conn *net.UDPConn) {
 			//dev.udpAddr = nrl.UDPAddr
 			dev.LastPacketTime = nrl.timeStamp
 			dev.Traffic = dev.Traffic + 42 + 48 + len(nrl.DATA)
-			totalstats.Traffic = totalstats.Traffic + 42 + 48 + len(nrl.DATA)
+			packetTraffic := 42 + 48 + len(nrl.DATA)
+			addTotalStats(func(stats *totalStats) {
+				stats.Traffic += packetTraffic
+			})
 
 			if nrl.DevModel != 200 {
 				NRL21SetDevDMRID(dev.DMRID, data[:n])
@@ -370,7 +382,7 @@ func udpProcess(conn *net.UDPConn) {
 			} else if dev.GroupID >= 999 || dev.GroupID == 0 {
 
 				//否则使用公共群组连接池
-				if p, ok := publicGroupMap[dev.GroupID]; ok {
+				if p, ok := publicGroupLoad(dev.GroupID); ok {
 
 					NRL21parser(nrl, data[:n], dev, conn, p)
 				}
@@ -395,13 +407,13 @@ func udpProcess(conn *net.UDPConn) {
 			pcmBufSize := mixRate * 20 / 1000 // 20ms 帧大小
 
 			dd := &deviceInfo{
-				CallSignSSID: callsignSSID,
-				CallSign:     nrl.CallSign,
-				SSID:         nrl.SSID,
-				DevModel:     nrl.DevModel,
-				Priority:     100,
-				ChanName:     make([]string, 16),
-				pcmBuffer:    make([]int, pcmBufSize),
+				CallSignSSID:    callsignSSID,
+				CallSign:        nrl.CallSign,
+				SSID:            nrl.SSID,
+				DevModel:        nrl.DevModel,
+				Priority:        100,
+				ChanName:        make([]string, 16),
+				pcmBuffer:       make([]int, pcmBufSize),
 				SupportedCodecs: codecCaps,
 				PreferredCodec:  nrl.CodecType,
 			}
@@ -433,17 +445,17 @@ func udpProcess(conn *net.UDPConn) {
 				continue
 			}
 
-			if p, ok := publicGroupMap[d.GroupID]; ok {
+			if p, ok := publicGroupLoad(d.GroupID); ok {
 
-				p.devMap[d.ID] = d
+				p.devStore(d)
 
 				NRL21parser(nrl, data[:n], d, conn, p)
 
-			} else {
+			} else if p, ok := publicGroupLoad(0); ok {
 
-				publicGroupMap[0].devMap[d.ID] = d
+				p.devStore(d)
 
-				NRL21parser(nrl, data[:n], d, conn, publicGroupMap[0])
+				NRL21parser(nrl, data[:n], d, conn, p)
 
 			}
 
@@ -463,7 +475,10 @@ func groupForDevice(dev *deviceInfo) *group {
 			return u.(*userinfo).Groups[dev.GroupID]
 		}
 	}
-	return publicGroupMap[dev.GroupID]
+	if g, ok := publicGroupLoad(dev.GroupID); ok {
+		return g
+	}
+	return nil
 }
 
 func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDPConn, gp *group) {
@@ -501,7 +516,9 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 		dev.LastVoiceEndTime = nrl.timeStamp
 
 		dev.VoiceTime = dev.VoiceTime + 63
-		totalstats.VoiceTime = totalstats.VoiceTime + 63
+		addTotalStats(func(stats *totalStats) {
+			stats.VoiceTime += 63
+		})
 
 		// if gp.connPool.allowCALLSSID != "" && gp.connPool.allowCALLSSID != dev.CallSignSSID {
 		// 	return
@@ -555,7 +572,7 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 
 		//判断设备是否已经在组内，有可能设备网络重新连接过，udp端口号变化过，需要重新加入组内
 		if gp.connPool.ensureDevice(nrl.UDPAddrStr, dev) && nrl.SSID == 200 {
-			ServerMap[nrl.CallSign] = dev
+			serverMapStore(nrl.CallSign, dev)
 		}
 
 		//如何是服务器自己发出的和其他服务器连接的心跳包，则更新在线状态，不能继续转发
@@ -694,7 +711,9 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 		dev.LastVoiceEndTime = nrl.timeStamp
 
 		dev.VoiceTime = dev.VoiceTime + 20
-		totalstats.VoiceTime = totalstats.VoiceTime + 20
+		addTotalStats(func(stats *totalStats) {
+			stats.VoiceTime += 20
+		})
 
 		// if gp.connPool.allowCALLSSID != "" && gp.connPool.allowCALLSSID != dev.CallSignSSID {
 		// 	return

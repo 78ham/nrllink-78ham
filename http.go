@@ -2,9 +2,12 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	// _ "net/http/pprof"
 	// "github.com/jmoiron/sqlx"
@@ -40,7 +43,10 @@ type platforminfo struct {
 	Language string `json:"language"`
 }
 
-var totalstats = totalStats{}
+var (
+	totalstats   = totalStats{}
+	totalStatsMu sync.RWMutex
+)
 
 type totalStats struct {
 	DevNumber           int `json:"dev_number"`
@@ -60,14 +66,32 @@ type totalStats struct {
 	PlatformMPTotal     int `json:"platform_mptotal"`
 }
 
+func totalStatsSnapshot() totalStats {
+	totalStatsMu.RLock()
+	snapshot := totalstats
+	totalStatsMu.RUnlock()
+	return snapshot
+}
+
+func updateTotalStats(fn func(*totalStats)) {
+	totalStatsMu.Lock()
+	fn(&totalstats)
+	totalStatsMu.Unlock()
+}
+
+func addTotalStats(fn func(*totalStats)) {
+	updateTotalStats(fn)
+}
+
 func (j *jsonapi) httpTotalStats(w http.ResponseWriter, req *http.Request) {
 
-	totalstats.DevNumber = devMapLen()
-	totalstats.OnlineDevNumber = currentOnlineDeviceCount()
-	totalstats.UserNumber = 1000
+	stats := totalStatsSnapshot()
+	stats.DevNumber = devMapLen()
+	stats.OnlineDevNumber = currentOnlineDeviceCount()
+	stats.UserNumber = 1000
 	//totalstats.UserNumber = len(userlist)
 
-	rescode, _ := jsonextra.Marshal(totalstats)
+	rescode, _ := jsonextra.Marshal(stats)
 
 	respone := fmt.Sprintf(`{"code":20000,"data":{"items":%s}}`, rescode)
 
@@ -110,36 +134,65 @@ func sethttphead(w http.ResponseWriter) {
 }
 
 func writeJSONResponseItems(w http.ResponseWriter, data interface{}, total int) {
-	rescode, err := jsonextra.Marshal(data)
-	if err != nil {
-		w.Write([]byte(`{"code":20001,"data":{"message":"JSON序列化失败"}}`))
-		return
-	}
-	var respone string
-	if total > 0 {
-		respone = fmt.Sprintf(`{"code":20000,"data":{"total":%v,"items":%s}}`, total, rescode)
-	} else {
-		respone = fmt.Sprintf(`{"code":20000,"data":{"items":%s}}`, rescode)
-	}
-	w.Write([]byte(respone))
+	writeJSONEnvelope(w, 20000, struct {
+		Total int         `json:"total,omitempty"`
+		Items interface{} `json:"items"`
+	}{Total: total, Items: data})
 }
 
 func writeJSONResponseItem(w http.ResponseWriter, data interface{}) {
-	rescode, err := jsonextra.Marshal(data)
-	if err != nil {
-		w.Write([]byte(`{"code":20001,"data":{"message":"JSON序列化失败"}}`))
-		return
-	}
-	respone := fmt.Sprintf(`{"code":20000,"data":{"items":%s}}`, rescode)
-	w.Write([]byte(respone))
+	writeJSONEnvelope(w, 20000, struct {
+		Items interface{} `json:"items"`
+	}{Items: data})
 }
 
 func writeJSONResponseMessage(w http.ResponseWriter, message string, code int) {
 	if code == 0 {
 		code = 20000
 	}
-	respone := fmt.Sprintf(`{"code":%d,"data":{"message":"%s"}}`, code, message)
-	w.Write([]byte(respone))
+	writeJSONEnvelope(w, code, struct {
+		Message string `json:"message"`
+	}{Message: message})
+}
+
+func writeJSONEnvelope(w http.ResponseWriter, code int, data interface{}) {
+	payload, err := jsonextra.Marshal(struct {
+		Code int         `json:"code"`
+		Data interface{} `json:"data"`
+	}{Code: code, Data: data})
+	if err != nil {
+		w.Write([]byte(`{"code":20001,"data":{"message":"JSON serialization failed"}}`))
+		return
+	}
+	w.Write(payload)
+}
+
+func readRequestBodyRaw(req *http.Request) ([]byte, error) {
+	defer req.Body.Close()
+	return io.ReadAll(req.Body)
+}
+
+func readRequestBody(w http.ResponseWriter, req *http.Request) ([]byte, bool) {
+	body, err := readRequestBodyRaw(req)
+	if err != nil {
+		log.Println("read request body err:", err)
+		w.Write(ResParmErr)
+		return nil, false
+	}
+	return body, true
+}
+
+func decodeRequestJSON(w http.ResponseWriter, req *http.Request, dst interface{}) bool {
+	body, ok := readRequestBody(w, req)
+	if !ok {
+		return false
+	}
+	if err := jsonextra.Unmarshal(body, dst); err != nil {
+		log.Println("decode request json err:", err)
+		w.Write(ResParmErr)
+		return false
+	}
+	return true
 }
 
 func writeJSONResponseError(w http.ResponseWriter, message string) {
@@ -300,16 +353,23 @@ func (j *jsonapi) msghttp() {
 
 	http.Handle("/", http.FileServer(http.Dir(conf.Web.Path)))
 
+	server := &http.Server{
+		Addr:              ":" + conf.Web.Port,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}
+
 	if conf.Web.SSLCrt != "" && conf.Web.SSLKey != "" {
 
-		err := http.ListenAndServeTLS(":"+conf.Web.Port, conf.Web.SSLCrt, conf.Web.SSLKey, nil)
+		err := server.ListenAndServeTLS(conf.Web.SSLCrt, conf.Web.SSLKey)
 		if err != nil {
 			log.Println("http server start err :", err)
 		}
 
 	} else {
 
-		err := http.ListenAndServe(":"+conf.Web.Port, nil)
+		err := server.ListenAndServe()
 
 		if err != nil {
 			log.Println("http server start err :", err)
