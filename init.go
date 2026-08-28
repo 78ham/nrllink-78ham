@@ -12,12 +12,15 @@ import (
 )
 
 // ensureBootstrap 在 updatedb() 之后、initAllUserList() 之前调用。
-// 检测是否为首次启动（无用户表或无 admin 角色用户），若是则：
+// 每次启动先清除发行包自带的旧默认管理员账号（purgeLegacyAdmins），
+// 再检测是否为首次启动（无用户表或无 admin 角色用户），若是则：
 //  1. 创建所有核心表（DDL 覆盖 db/sqlite.sql 全量）
 //  2. 创建 admin 角色
 //  3. 创建默认 admin 用户（callsign=NOCALL, roles=admin, must_change_pwd=1）
 //  4. 打印随机密码到 stdout
 func ensureBootstrap() {
+	purgeLegacyAdmins()
+
 	if isBootstrapped() {
 		return
 	}
@@ -45,6 +48,28 @@ func isBootstrapped() bool {
 		return false
 	}
 	return adminCount > 0
+}
+
+// purgeLegacyAdmins 删除发行包自带 udphub.sqlite3 中的旧默认管理员账号。
+// 该账号（callsign=NOCALL, phone=18900000000）自 2022 年随仓库分发，密码无从考证，
+// 且会使 isBootstrapped 误判为已初始化、跳过 seedAdmin，导致新部署既拿不到默认
+// 管理员、又遗留一个来历不明的管理员账号。每次启动都执行（幂等），以同时修复
+// 已部署的旧数据库；删除后若无任何管理员，seedAdmin 会创建新的随机密码管理员。
+func purgeLegacyAdmins() {
+	var tblCount int
+	err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='users'").Scan(&tblCount)
+	if err != nil || tblCount == 0 {
+		return
+	}
+
+	res, err := db.Exec("DELETE FROM users WHERE callsign='NOCALL' AND phone='18900000000' AND roles LIKE '%admin%'")
+	if err != nil {
+		log.Printf("[bootstrap] purge legacy admin error: %v", err)
+		return
+	}
+	if n, err := res.RowsAffected(); err == nil && n > 0 {
+		log.Printf("[bootstrap] 已移除发行包自带的旧默认管理员账号 (callsign=NOCALL, phone=18900000000)，共 %d 个", n)
+	}
 }
 
 func execDDL() {
