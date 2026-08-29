@@ -20,8 +20,8 @@ dockers:
     build_flag_templates:
       - --label=org.opencontainers.image.title={{ .ProjectName }}
       - --label=org.opencontainers.image.description=Radio over network.
-      - --label=org.opencontainers.image.url=https://github.com/hicaoc/nrllink
-      - --label=org.opencontainers.image.source=https://github.com/hicaoc/nrllink
+      - --label=org.opencontainers.image.url=https://github.com/78ham/nrllink-78ham
+      - --label=org.opencontainers.image.source=https://github.com/78ham/nrllink-78ham
       - --label=org.opencontainers.image.version={{ .Version }}
       - --label=org.opencontainers.image.created={{ time "2006-01-02T15:04:05Z07:00" }}
       - --label=org.opencontainers.image.revision={{ .FullCommit }}
@@ -30,7 +30,7 @@ dockers:
 nfpms:
   - maintainer: BH4RPN <caoc@live.com>
     description: Radio over network.
-    homepage: https://github.com/hicaoc/nrllink
+    homepage: https://github.com/78ham/nrllink-78ham
     license: MIT
     formats:
       - deb
