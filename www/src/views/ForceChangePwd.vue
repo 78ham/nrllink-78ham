@@ -2,7 +2,7 @@
   <div class="force-container">
     <div class="card">
       <h2>首次登录 - 请修改密码</h2>
-      <p class="hint">检测到您使用的是默认管理员账户，请立即修改密码。</p>
+      <p class="hint">首次登录请修改密码。</p>
       <n-form ref="formRef" :model="form" :rules="rules">
         <n-form-item path="password">
           <n-input v-model:value="form.password" type="password" placeholder="新密码（至少8位，含大小写+数字+特殊字符）" size="large" />
@@ -22,6 +22,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
+import { NForm, NFormItem, NInput, NButton } from 'naive-ui'
 import { useUserStore } from '../stores/user'
 
 const router = useRouter()
@@ -43,6 +44,11 @@ const rules = {
 }
 
 async function handleSubmit() {
+  try {
+    await formRef.value?.validate()
+  } catch {
+    return
+  }
   loading.value = true
   errorMsg.value = ''
   try {

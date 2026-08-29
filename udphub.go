@@ -730,9 +730,6 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 		//fmt.Println(at)
 		dev.LastATcommand = at
 
-	case 12: //COM 透传
-		forwardCOM(nrl, packet, gp)
-
 	default:
 		fmt.Println("unknow data:", nrl.Type, nrl)
 		//conn.WriteToUDP(packet, n.Addr)
@@ -773,6 +770,10 @@ func FullNetOutput(nrl *NRL21packet, dev *deviceInfo, packet []byte) {
 
 }
 
+// forwardCOM 历史遗留的 COM 串口透传转发。
+// 协议变更已停用：Type 12 早期用于 COM 透传，Codec2 引入后已重新分配给
+// Codec2 700C（见 case 1, 8, 12, 13, 14, 15, 16 语音分支），
+// 原重复的 case 12（COM 透传）已删除，本函数当前无调用点，保留仅供回溯。
 func forwardCOM(nrl *NRL21packet, packet []byte, gp *group) {
 
 	if gp.ID > 3 {

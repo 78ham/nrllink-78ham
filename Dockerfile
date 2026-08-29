@@ -1,13 +1,21 @@
-FROM golang:1.21-alpine AS builder
+# ---- Stage 1: Build ----
+FROM golang:1.24-alpine AS builder
+RUN apk add --no-cache gcc musl-dev
 WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o udphub .
 
-FROM alpine:3.19
+# ---- Stage 2: Runtime ----
+FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata
-COPY --from=builder /app/udphub /nrllink/udphub
-RUN mkdir -p /nrllink/conf /nrllink/data
-COPY start.sh /nrllink/
+
+RUN mkdir -p /nrllink/udphub /nrllink/data /nrllink/conf
+COPY --from=builder /app/udphub /nrllink/udphub/udphub
+COPY start.sh /nrllink/start.sh
+RUN chmod +x /nrllink/start.sh
+
+WORKDIR /nrllink
+EXPOSE 9000 60050/udp
 ENTRYPOINT ["/nrllink/start.sh"]

@@ -60,7 +60,7 @@ func (p *Server) Start() error {
 			return nil
 		}
 
-		dev.udpSocket = globalConn
+		dev.udpSocket = globelconn
 		dev.udpAddr = addr
 
 		//dev.ISOnline = true
@@ -89,7 +89,7 @@ func (p *Server) Start() error {
 		dev = &deviceInfo{
 			Name:      p.IPAddr + ":" + p.UDPPort,
 			CallSign:  p.OwerCallsign,
-			udpSocket: globalConn,
+			udpSocket: globelconn,
 			udpAddr:   addr,
 			SSID:      200,
 			Priority:  100,
@@ -112,7 +112,7 @@ func (p *Server) Start() error {
 			return fmt.Errorf("get device error")
 		}
 
-		dev.udpSocket = globalConn
+		dev.udpSocket = globelconn
 		dev.udpAddr = addr
 		dev.DevModel = 200
 		//dev.ISOnline = true

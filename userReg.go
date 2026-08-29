@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -34,7 +35,8 @@ func (j *jsonapi) httpRegisterList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	emplist, total := selectReguser(queryToWhere("", *stb))
+	ww, args, pp, rsort := queryToWhere("", *stb)
+	emplist, total := selectReguser(ww, args, pp, rsort)
 
 	rescode, _ := jsonextra.Marshal(emplist)
 

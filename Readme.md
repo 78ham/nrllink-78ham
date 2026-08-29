@@ -119,10 +119,6 @@ nrllink-78ham/
 ├── udphub.yaml              # 默认配置文件
 ├── udphub.service           # systemd服务文件
 │
-├── db/
-│   ├── sqlite.sql           # 基础9张表DDL
-│   └── update.sql           # registers表迁移
-│
 └── doc/
     ├── 系统架构.md           # 579行完整系统架构文档
     ├── 系统架构.html         # HTML渲染版
@@ -182,8 +178,10 @@ main()
   ├── conf.init()                              # 加载udphub.yaml
   ├── initTokenKey()                           # 初始化JWT签名密钥
   ├── dbip = ipdb.City()                       # 加载IP地理位置数据库
-  ├── getDB()                                  # 打开SQLite数据库
-  ├── updatedb()                               # Schema迁移检查与执行
+  ├── getDB()                                  # 打开SQLite数据库(支持NRL_DBFILE环境变量; PRAGMA integrity_check)
+  ├── execDDL()                                # 无条件、幂等、全量建表(schema唯一来源)
+  ├── updatedb()                               # 增量Schema迁移检查与执行(每条仅一次)
+  ├── ensureBootstrap()                        # 启动引导(首次启动创建默认管理员/记录meta元数据)
   ├── chatgptInit()                            # 初始化OpenAI客户端
   ├── initPublicGroup()                        # 初始化房间0(公共大厅)+房间999(全网互通)
   ├── initAllUserList()                        # 加载所有用户(创建3个私有房间)
@@ -235,10 +233,18 @@ type config struct {
 4. 支持 `-o json` / `-o yaml` 输出解析结果并退出
 5. 将配置中的 `PlatformList` 赋值给全局变量
 
-**`updatedb()`** - Schema迁移系统:
+**`execDDL()`** - 全量建表:
+- 每次启动无条件执行，幂等（CREATE TABLE IF NOT EXISTS 等）
+- schema 的唯一来源（仓库不再包含 `db/sqlite.sql` / `db/update.sql`）
+
+**`updatedb()`** - 增量Schema迁移系统:
 - 通过 `schema_migrations` 表追踪已执行的DDL
 - 支持的迁移操作: `ALTER TABLE ADD COLUMN`、`CREATE TABLE`、`DELETE`、`DROP INDEX`、`CREATE UNIQUE INDEX`
-- 每条语句仅执行一次
+- 每条语句仅执行一次（如：`users.must_change_pwd` 独立列、存量 `routes='MUST_CHANGE_PWD'` 数据迁移）
+
+**`ensureBootstrap()`** - 启动引导:
+- 依赖 `meta` 表（key/value）记录 `bootstrapped_at`、`default_admin_id`
+- 首次启动且系统无管理员时创建默认管理员（呼号默认 `NOCALL`，可配置），随机密码打印到 stdout，带强制改密标记，同时写入首条操作日志
 
 ---
 
@@ -507,7 +513,7 @@ const (
 // Request
 {"username":"13900001111","password":"123456"}
 // Response
-{"code":20000,"data":{"token":"eyJhbG..."}}
+{"code":20000,"data":{"token":"eyJhbG...","default_admin":false}}
 ```
 - 支持按手机号或呼号登录
 - 密码使用bcrypt加密验证
@@ -520,8 +526,9 @@ const (
 Query: ?token=<JWT>
 ```
 ```json
-{"code":20000,"data":{"roles":["ham"],"name":"张三","callsign":"BH4XXX","avatar":"","introduction":"","routes":[...],"billing_enabled":false,...}}
+{"code":20000,"data":{"roles":["ham"],"name":"张三","callsign":"BH4XXX","avatar":"","introduction":"","routes":[...],"billing_enabled":false,"default_admin":false,...}}
 ```
+> `default_admin` 字段标识当前用户是否为系统默认管理员（前端据此展示顶部黄色警告条）
 
 **`POST /user/logout`**
 > 用户登出(下线SSID=100的设备)
@@ -566,7 +573,8 @@ Query: ?token=<JWT>
 > 按DMR ID查找呼号 `?id=4600001`
 
 **`POST /user/delete`**
-> 管理员删除用户(不能删除admin角色)
+> 管理员删除用户；默认管理员可删除（删除后清除其标记并记录操作日志），仅禁止删除系统中最后一个管理员（禁用/降级最后一个管理员同样被拦截）
+> API别名: `/api/v1/user/delete`（另有 `/api/v1/user/password`、`/api/v1/user/create` 别名对应上述同名接口）
 
 ---
 
@@ -1281,6 +1289,7 @@ type query struct {
 | pid | TEXT | PID |
 | last_login_ip | TEXT | 最后登录IP |
 | expire_time | TEXT | 过期时间(计费) |
+| must_change_pwd | INTEGER | 强制改密标记(1=下次登录必须修改密码) |
 
 ### public_groups - 公共群组表
 
@@ -1451,6 +1460,13 @@ type query struct {
 | alt_text | TEXT | ALT文本 |
 | category | TEXT | 分类 |
 
+### meta - 元数据表（引导状态）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| key | TEXT PK | 元数据键(`bootstrapped_at` 引导完成时间 / `default_admin_id` 默认管理员用户ID) |
+| value | TEXT | 元数据值 |
+
 ---
 
 ## 配置文件
@@ -1531,6 +1547,9 @@ billing:
     mchcertserial: "" # 商户证书序列号
     mchapiv3key: ""   # APIv3密钥
     mchprivatekeypath: "" # 商户私钥路径
+
+bootstrap:                        # 首次启动引导配置(可选)
+  defaultadmincallsign: "NOCALL"  # 首次启动创建的默认管理员呼号(默认NOCALL)
 
 platformlist:    # 配置文件中的初始服务器列表(启动后会被APRS/官网同步覆盖)
   - name: nrlptt主站
@@ -1726,6 +1745,63 @@ ChatGPT集成:
 ---
 
 ## 部署
+
+### 数据库初始化与启动顺序
+
+启动时数据库处理按以下顺序执行：
+
+```
+getDB()              # 打开数据库（父目录/文件不存在时自动创建；支持 NRL_DBFILE 环境变量）
+  → execDDL()        # 无条件、幂等、全量建表（schema 唯一来源）
+  → updatedb()       # 增量迁移（每条语句仅执行一次）
+  → ensureBootstrap()# 启动引导（首次启动创建默认管理员）
+```
+
+- **首次部署自动从零建库**：发行包不再自带 `udphub.sqlite3`；`DBfile` 父目录不存在时自动创建；
+  数据库文件不存在时日志打印"检测到首次部署，将自动创建数据库"。
+- 连接串追加 `_busy_timeout=5000`；连接池上限 1；未启用 WAL。
+- 环境变量 `NRL_DBFILE` 可覆盖配置文件中的 `DBfile`：
+
+```bash
+docker run -d \
+  -p 80:80 -p 60050:60050/udp \
+  -e NRL_DBFILE=/nrllink/data/udphub.sqlite3 \
+  -v /data:/nrllink/data -v /conf:/nrllink/conf \
+  hicaoc/nrllink:latest
+```
+
+### 首次启动与默认管理员流程
+
+1. 启动服务，关注启动日志中打印的 **16 位随机管理员密码**（容器部署用 `docker logs <容器>` 获取）
+2. 用呼号 `NOCALL`（或 `Bootstrap.DefaultAdminCallsign` 配置的值）+ 随机密码登录 Web 管理后台
+3. 系统强制要求修改密码（`must_change_pwd` 标记）
+4. 在【用户管理】页面创建自己的管理员账号
+5. 删除默认管理员账号（顶部黄色警告条随之消失；删除动作会清除默认标记并记录操作日志）
+
+> 存量已有管理员的数据库升级后**不会**被创建默认管理员（仅补写 `meta` 引导元数据）。
+> 默认管理员登录期间前端顶部常驻黄色警告条，不可关闭，删除默认账号后消失。
+> 行为变化提示：`must_change_pwd` 此前因查询遗漏实际恒为 false（失效），本次修复后真实生效，
+> 存量带旧标记（`routes='MUST_CHANGE_PWD'`）的用户升级后将被真正强制改密。
+
+### DBfile 路径建议（重要）
+
+- 建议将 `DBfile` 配置到**持久卷内**，如 `/nrllink/data/udphub.sqlite3`。
+- 仓库默认配置的路径 `/nrllink/udphub.sqlite3` **不在**常见 Docker volume 挂载点（`/nrllink/data`）内，
+  换容器/重建容器会**丢失整个数据库**。请修改 `udphub.yaml` 中的 `dbfile`，或通过 `NRL_DBFILE` 环境变量指定到持久卷。
+- 建议定期备份该数据库文件。
+
+### 数据库损坏处理策略（坏库策略）
+
+- 打开数据库后执行 `PRAGMA integrity_check`，数据库文件损坏时**明确报错退出**，
+  **不会自动删除或重建**（防数据丢失，需运维介入）。
+- 手工补救示例（如修复存量强制改密旧标记）：
+
+```bash
+sqlite3 udphub.sqlite3 "UPDATE users SET must_change_pwd=1, routes='' WHERE routes='MUST_CHANGE_PWD';"
+```
+
+- 确认无法修复时，可手工移除损坏文件后重启，服务将按首次部署流程从零建库（原数据丢失，需从备份恢复）。
+
 
 ### 端口说明
 

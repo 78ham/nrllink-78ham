@@ -79,7 +79,7 @@ func checkHttpRequest(w http.ResponseWriter, req *http.Request, rolelist []strin
 
 	result, ok := readRequestBody(w, req)
 	if !ok {
-		return
+		return nil, nil, nil
 	}
 
 	stb := &query{}

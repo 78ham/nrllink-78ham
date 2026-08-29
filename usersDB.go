@@ -49,6 +49,7 @@ type userinfo struct {
 	AlarmMsg      bool          `json:"alarm_msg" db:"alarm_msg"`
 	NickName      string        `json:"nickname" db:"nickname"`
 	OpenID        string        `json:"openid" db:"openid"`
+	MustChangePwd int           `json:"must_change_pwd" db:"must_change_pwd"`
 	TalkDuration  time.Duration `json:"talk_duration"`
 	TalkTimes     int           `json:"talk_times"`
 }
@@ -167,7 +168,7 @@ func delRole(k string) {
 
 }
 
-func selectuser(w string, p string, sort string) ([]userinfo, int) {
+func selectuser(w string, args []interface{}, p string, sort string) ([]userinfo, int) {
 
 	emp := []userinfo{}
 
@@ -179,7 +180,7 @@ func selectuser(w string, p string, sort string) ([]userinfo, int) {
 
 	//fmt.Println(query)
 
-	rows, err := db.Query(query)
+	rows, err := db.Query(query, args...)
 	if err != nil {
 		log.Println("查询用户列表错误: ", err, "\n", query)
 		return nil, 0
@@ -207,7 +208,7 @@ func selectuser(w string, p string, sort string) ([]userinfo, int) {
 	var t int
 	q := fmt.Sprintf(`SELECT count(*) as total FROM users  %v  `, w)
 	//fmt.Println(q)
-	row := db.QueryRow(q)
+	row := db.QueryRow(q, args...)
 	err = row.Scan(&t)
 	if err != nil {
 		log.Println(" 查询用户列表total错误 err:", err, t)
@@ -231,14 +232,14 @@ func getuser(username string) (*userinfo, error) {
 	callsign,gird,birthday,mdcid,dmrid,
 	sex,nickname,openid,avatar,address, status,
 	last_login_time, login_err_times, last_login_ip,
-	alarm_msg,roles,create_time,update_time,expire_time FROM users where phone=? or callsign=? `
+	alarm_msg,roles,create_time,update_time,expire_time,must_change_pwd FROM users where phone=? or callsign=? `
 
 	row := db.QueryRow(query, username, username)
 	err := row.Scan(&r.ID, &r.PID, &r.Name, &r.Phone,
 		&r.CallSign, &r.Gird, &r.Birthday, &r.MDCID, &r.DMRID,
 		&r.Sex, &r.NickName, &r.OpenID, &r.Avatar, &r.Address, &r.Status,
 		&r.LastLoginTime, &r.LoginErrTimes, &r.LastLoginIP,
-		&r.AlarmMsg, &roles, &r.CreateTime, &r.UpdateTime, &r.ExpireTime)
+		&r.AlarmMsg, &roles, &r.CreateTime, &r.UpdateTime, &r.ExpireTime, &r.MustChangePwd)
 	if err != nil {
 		log.Println("getuser by username err :", err, "\n", query)
 		return nil, err
@@ -260,14 +261,14 @@ func getuserByID(id int) (*userinfo, error) {
 	callsign,gird,birthday,mdcid,dmrid,
 	sex,nickname,openid,avatar,address, status,
 	last_login_time, login_err_times, last_login_ip,
-	alarm_msg,roles,create_time,update_time,expire_time FROM users where id=? `
+	alarm_msg,roles,create_time,update_time,expire_time,must_change_pwd FROM users where id=? `
 
 	row := db.QueryRow(query, id)
 	err := row.Scan(&r.ID, &r.PID, &r.Name, &r.Phone,
 		&r.CallSign, &r.Gird, &r.Birthday, &r.MDCID, &r.DMRID,
 		&r.Sex, &r.NickName, &r.OpenID, &r.Avatar, &r.Address, &r.Status,
 		&r.LastLoginTime, &r.LoginErrTimes, &r.LastLoginIP,
-		&r.AlarmMsg, &roles, &r.CreateTime, &r.UpdateTime, &r.ExpireTime)
+		&r.AlarmMsg, &roles, &r.CreateTime, &r.UpdateTime, &r.ExpireTime, &r.MustChangePwd)
 	if err != nil {
 		log.Println("getuser by id err :", err, "\n", query)
 		return nil, err
@@ -480,16 +481,28 @@ func addUser(e *userinfo) error {
 
 }
 
-func deleteUser(e *userinfo) {
+func deleteUser(e *userinfo) error {
 
 	_, err := db.Exec("delete from users where id=?", e.ID)
 	if err != nil {
 		log.Println("delete user failed, ", err)
-		return
+		return err
+	}
+
+	// 先从内存缓存取出旧值，再清理非空的 mdcid/dmrid 映射（参照 updateUserProfile 的做法）
+	if oldUser, ok := userlist.Load(e.CallSign); ok {
+		old := oldUser.(*userinfo)
+		if old.MDCID != "" {
+			mdcidmap.Delete(old.MDCID)
+		}
+		if old.DMRID != "" {
+			dmridmap.Delete(old.DMRID)
+		}
 	}
 
 	userlist.Delete(e.CallSign)
 
+	return nil
 }
 
 func updateUser(e *userinfo) error {

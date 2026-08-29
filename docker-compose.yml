@@ -1,0 +1,13 @@
+services:
+  nrllink:
+    build: .
+    ports:
+      - "9000:9000"      # HTTP Web UI
+      - "60050:60050/udp"  # UDP protocol
+    volumes:
+      - nrllink-data:/nrllink/data
+      - ./udphub.yaml:/nrllink/udphub/udphub.yaml:ro
+    restart: unless-stopped
+
+volumes:
+  nrllink-data:

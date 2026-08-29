@@ -34,13 +34,17 @@ func (j *jsonapi) init() {
 }
 
 type platforminfo struct {
-	Name     string `json:"name"`
-	LogoURL  string `json:"logourl"`
-	Version  string `json:"version"`
-	ICP      string `json:"icp"`
-	Mail     string `json:"mail"`
-	Callsign string `json:"callsign"`
-	Language string `json:"language"`
+	Name        string `json:"name"`
+	LogoURL     string `json:"logourl"`
+	Version     string `json:"version"`
+	ICP         string `json:"icp"`
+	Mail        string `json:"mail"`
+	Callsign    string `json:"callsign"`
+	Language    string `json:"language"`
+	TechSupport string `json:"tech_support"`
+	Copyright   string `json:"copyright"`
+	LoginSlogan string `json:"login_slogan"`
+	CSQRURL     string `json:"cs_qr_url"`
 }
 
 var (
@@ -101,13 +105,17 @@ func (j *jsonapi) httpTotalStats(w http.ResponseWriter, req *http.Request) {
 func (j *jsonapi) httpplatforminfo(w http.ResponseWriter, req *http.Request) {
 
 	p := platforminfo{
-		Name:     conf.SystemInfo.PlatformName,
-		LogoURL:  conf.SystemInfo.LogoURL,
-		Language: conf.SystemInfo.Language,
-		Version:  "v2.0.0",
-		ICP:      conf.Web.ICP,
-		Mail:     "caoc@live.com",
-		Callsign: "BH4RPN",
+		Name:        getSiteSetting("platform_name", conf.SystemInfo.PlatformName),
+		LogoURL:     getSiteSetting("logo_url", conf.SystemInfo.LogoURL),
+		Language:    getSiteSetting("language", conf.SystemInfo.Language),
+		Version:     "v2.0.0",
+		ICP:         getSiteSetting("icp", conf.Web.ICP),
+		Mail:        getSiteSetting("contact_mail", "caoc@live.com"),
+		Callsign:    getSiteSetting("contact_callsign", "BH4RPN"),
+		TechSupport: getSiteSetting("tech_support", ""),
+		Copyright:   getSiteSetting("copyright", ""),
+		LoginSlogan: getSiteSetting("login_slogan", ""),
+		CSQRURL:     getSiteSetting("cs_qr_url", ""),
 	}
 
 	rescode, _ := jsonextra.Marshal(p)
@@ -240,6 +248,22 @@ func (j *jsonapi) msghttp() {
 	registerRoute("/platform/info", j.httpplatforminfo)
 	registerRoute("/platform/list", j.httpplatformList)
 	registerRoute("/platform/totalstats", j.httpTotalStats)
+	registerRoute("/platform/site-settings", j.httpSiteSettings)
+	registerRoute("/platform/site-settings/update", j.httpSiteSettingsUpdate)
+	registerRoute("/server/register", j.httpRegisterServer)
+
+	// 首页 CMS（公告/板块/图片）
+	registerRoute("/homepage/sections", j.httpHomepageSections)
+	registerRoute("/homepage/announcements", j.httpHomepageAnnouncements)
+	registerRoute("/homepage/admin/sections", j.httpAdminHomepageSections)
+	registerRoute("/homepage/admin/sections/update", j.httpAdminHomepageSectionsUpdate)
+	registerRoute("/homepage/admin/sections/delete", j.httpAdminHomepageSectionsDelete)
+	registerRoute("/homepage/admin/announcements/create", j.httpAdminHomepageAnnouncementsCreate)
+	registerRoute("/homepage/admin/announcements/update", j.httpAdminHomepageAnnouncementsUpdate)
+	registerRoute("/homepage/admin/announcements/delete", j.httpAdminHomepageAnnouncementsDelete)
+	registerRoute("/homepage/admin/images/upload", j.httpAdminHomepageImageUpload)
+	registerRoute("/homepage/admin/images", j.httpAdminHomepageImageList)
+	registerRoute("/homepage/admin/images/delete", j.httpAdminHomepageImageDelete)
 
 	registerRoute("/device/list", j.httpDeviceList)
 	registerRoute("/device/db/list", j.httpDevicesList)
@@ -336,8 +360,13 @@ func (j *jsonapi) msghttp() {
 	api("/relays", j.httpGetRelayList)
 	api("/servers", j.httpServersList)
 	api("/users", j.httpUserList)
+	api("/user/password", j.httpUpdateUserPassword)
+	api("/user/create", j.httpAddUser)
+	api("/user/delete", j.httpDeleteUser)
 	api("/stats", j.httpTotalStats)
 	api("/platform/info", j.httpplatforminfo)
+	api("/platform/site-settings", j.httpSiteSettings)
+	api("/platform/site-settings/update", j.httpSiteSettingsUpdate)
 
 	//http.HandleFunc("/login", j.httplogin)
 	//http.HandleFunc("/reg", j.httpreg)

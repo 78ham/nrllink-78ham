@@ -1,3 +1,4 @@
+# Binaries
 udphub
 udphub.arm
 udphub.exe
@@ -5,6 +6,29 @@ udphub.arm64
 nrllink_windows_x86_64.exe
 nrllink
 nrllink_test
-go.sum
-.vscode/settings.json
-udphub.tgz
+
+# Build artifacts
+*.exe
+*.exe~
+*_test
+*.tgz
+
+# Database
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
+# IDE
+.vscode/
+.idea/
+
+# Docker
+docker-compose.override.yml
+
+# Codex / Playwright
+.codex/
+.playwright-cli/
+
+# Frontend build artifacts (www/ is the built-in frontend)
+www/dist/
+www/node_modules/

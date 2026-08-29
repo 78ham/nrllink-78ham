@@ -130,6 +130,10 @@ type config struct {
 	Voice struct {
 		MixSampleRate int `yaml:"MixSampleRate" json:"mix_sample_rate"`
 	} `yaml:"Voice" json:"voice"`
+
+	Bootstrap struct {
+		DefaultAdminCallsign string `yaml:"DefaultAdminCallsign" json:"default_admin_callsign"`
+	} `yaml:"bootstrap" json:"bootstrap"`
 }
 
 var conf = &config{}
@@ -201,6 +205,9 @@ func (c *config) init() {
 	if conf.Voice.MixSampleRate == 0 {
 		conf.Voice.MixSampleRate = 16000
 	}
+	if conf.Bootstrap.DefaultAdminCallsign == "" {
+		conf.Bootstrap.DefaultAdminCallsign = "NOCALL"
+	}
 }
 
 // Exist 判断文件存在
@@ -214,14 +221,37 @@ var db *sql.DB
 
 func getDB() *sql.DB {
 
+	if envDBfile := os.Getenv("NRL_DBFILE"); envDBfile != "" {
+		conf.System.DBfile = envDBfile
+	}
+
+	if err := os.MkdirAll(filepath.Dir(conf.System.DBfile), 0755); err != nil {
+		log.Fatalf("create db dir err: %v", err)
+	}
+
+	if !Exist(conf.System.DBfile) {
+		log.Println("检测到首次部署，将自动创建数据库")
+	}
+
 	var err error
 
-	db, err = sql.Open("sqlite3", conf.System.DBfile)
+	db, err = sql.Open("sqlite3", "file:"+conf.System.DBfile+"?_busy_timeout=5000")
 
 	if err != nil {
 		log.Fatal(err)
-		os.Exit(1)
 	}
+
+	if err = db.Ping(); err != nil {
+		log.Fatal(err)
+	}
+
+	var integrity string
+	if err = db.QueryRow("PRAGMA integrity_check").Scan(&integrity); err != nil || integrity != "ok" {
+		log.Fatalf("数据库文件损坏: %v，请人工介入，程序不会自动删除或重建数据库", integrity)
+	}
+
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	return db
 }
@@ -281,6 +311,18 @@ func updatedb() {
 		"DROP INDEX idx_callsign_unique",
 		"CREATE UNIQUE INDEX idx_users_phone_unique ON users(phone);",
 		"CREATE UNIQUE INDEX idx_users_callsign_unique ON users(callsign);",
+
+		// —— 数据库重构（追加迁移，只允许在末尾追加，严禁修改以上既有语句文本）——
+		"ALTER TABLE users ADD COLUMN must_change_pwd INTEGER DEFAULT 0;",
+		"UPDATE users SET must_change_pwd=1, routes='' WHERE routes='MUST_CHANGE_PWD';",
+		"ALTER TABLE users ADD COLUMN mdcid TEXT DEFAULT '';",
+		"ALTER TABLE users ADD COLUMN dmrid INTEGER DEFAULT 0 ;",
+		"ALTER TABLE devices ADD COLUMN priority INTEGER DEFAULT 100 ;",
+
+		// 补齐 devices.rf_type（旧库无此列会导致 initAllDevList 查询失败）
+		"ALTER TABLE devices ADD COLUMN rf_type INTEGER DEFAULT 0;",
+		// 清理 users 表 NULL 值（扫描到 string/int 会报错，旧库补默认值）
+		"UPDATE users SET gird=COALESCE(gird,''), birthday=COALESCE(birthday,''), sex=COALESCE(sex,0), avatar=COALESCE(avatar,''), address=COALESCE(address,''), introduction=COALESCE(introduction,''), last_login_time=COALESCE(last_login_time,''), openid=COALESCE(openid,''), nickname=COALESCE(nickname,''), pid=COALESCE(pid,''), last_login_ip=COALESCE(last_login_ip,''), expire_time=COALESCE(expire_time,''), mdcid=COALESCE(mdcid,''), dmrid=COALESCE(dmrid,0);",
 	}
 
 	// 记录已执行的迁移语句,保证每条只执行一次,避免每次启动重复执行

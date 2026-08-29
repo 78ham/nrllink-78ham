@@ -14,6 +14,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'groups', name: 'Groups', component: () => import('./views/GroupList.vue') },
       { path: 'voice', name: 'VoiceChat', component: () => import('./views/VoiceChat.vue') },
       { path: 'settings', name: 'Settings', component: () => import('./views/Settings.vue') },
+      { path: 'users', name: 'Users', component: () => import('./views/UserList.vue') },
     ]
   },
   { path: '/force-password', name: 'ForcePassword', component: () => import('./views/ForceChangePwd.vue') }

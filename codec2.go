@@ -24,8 +24,8 @@ const (
 // codec2Codec 实现 VoiceCodec 接口，包装 libcodec2。
 type codec2Codec struct {
 	mode       int
-	enc        *C.struct_codec2
-	dec        *C.struct_codec2
+	enc        *C.struct_CODEC2
+	dec        *C.struct_CODEC2
 	encMu      sync.Mutex
 	decMu      sync.Mutex
 	samplesPerFrame int

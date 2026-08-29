@@ -1,0 +1,14 @@
+.git
+.codex
+.vscode
+.idea
+*.exe
+*.exe~
+*_test
+*.sqlite3*
+udphub.tgz
+.dockerignore
+docker-compose*.yml
+doc/
+node_modules/
+www/dist/

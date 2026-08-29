@@ -36,7 +36,11 @@ func main() {
 
 	db = getDB()
 
+	execDDL()
+
 	updatedb()
+	initSiteSettingTable()
+	initHomepageTables()
 
 	ensureBootstrap()
 

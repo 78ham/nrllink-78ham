@@ -9,6 +9,5 @@
 </template>
 
 <script setup lang="ts">
-import { darkTheme } from 'naive-ui'
-import { zhCN, dateZhCN } from 'naive-ui'
+import { NConfigProvider, NMessageProvider, NNotificationProvider, darkTheme, zhCN, dateZhCN } from 'naive-ui'
 </script>

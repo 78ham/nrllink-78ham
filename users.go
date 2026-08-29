@@ -69,7 +69,8 @@ func (j *jsonapi) httpUserAllList(w http.ResponseWriter, req *http.Request) {
 	var emplist []userinfo
 	var total int
 
-	emplist, total = selectuser(queryToWhere("", *stb))
+	ww, args, pp, rsort := queryToWhere("", *stb)
+	emplist, total = selectuser(ww, args, pp, rsort)
 
 	rescode, _ := jsonextra.Marshal(emplist)
 
@@ -110,7 +111,8 @@ func (j *jsonapi) httpUserList(w http.ResponseWriter, req *http.Request) {
 	//stb.CurrentArea = strconv.Itoa(u.CurrentArea)
 	//员工漫游修改位常驻
 
-	emplist, total := selectuser(queryToWhere("", *stb))
+	ww, args, pp, rsort := queryToWhere("", *stb)
+	emplist, total := selectuser(ww, args, pp, rsort)
 
 	//emplist = selectuser()
 
@@ -253,6 +255,12 @@ func isValidDMRID(dmrid string) bool {
 	return true
 }
 
+// isDefaultAdmin 判断指定用户是否为引导流程创建的默认管理员（以 meta 表记录比对）。
+func isDefaultAdmin(id int) bool {
+	v, ok := getMeta("default_admin_id")
+	return ok && v == strconv.Itoa(id)
+}
+
 func (j *jsonapi) httpUpdateUser(w http.ResponseWriter, req *http.Request) {
 	sethttphead(w)
 
@@ -296,6 +304,17 @@ func (j *jsonapi) httpUpdateUser(w http.ResponseWriter, req *http.Request) {
 	// 	w.Write([]byte("{"code":20000,"data":{"message":"内置账号，无法修改"}}"))
 	// 	return
 	// }
+
+	// 加固：不能禁用或降级系统中最后一个管理员。
+	if target, err := getuserByID(stb.ID); err == nil && checkrole(target, []string{"admin"}) {
+		if !checkrole(stb, []string{"admin"}) || stb.Status != 1 {
+			var otherAdmins int
+			if err := db.QueryRow("SELECT count(*) FROM users WHERE roles LIKE '%admin%' AND id<>?", stb.ID).Scan(&otherAdmins); err != nil || otherAdmins == 0 {
+				w.Write([]byte(`{"code":20000,"data":{"message":"不能禁用或降级系统中最后一个管理员"}}`))
+				return
+			}
+		}
+	}
 
 	//stb.Area = u.Area
 	updateUser(stb)
@@ -414,20 +433,13 @@ func (j *jsonapi) httpUpdateUserPassword(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	if u.ID != stb.ID {
-		log.Println("update user  err :", err)
-		w.Write([]byte(`{"code":20000,"data":{"message":"无权限更新密码"}}`))
-		return
-
-	}
-
 	// if checkrole(stb, []string{"admin"}) {
 	// 	w.Write([]byte("{"code":20000,"data":{"message":"内置账号，无法修改"}}"))
 	// 	return
 	// }
 
 	//stb.Area = u.Area
-	err = updateUserPassword(stb.ID, stb.Password)
+	err = updateUserPassword(u.ID, stb.Password)
 
 	if err != nil {
 		log.Println("update user password err :", err)
@@ -435,7 +447,7 @@ func (j *jsonapi) httpUpdateUserPassword(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	clearMustChangePwd(stb.ID)
+	clearMustChangePwd(u.ID)
 	addOperatorLog(stb.String(), "修改密码成功", u)
 
 	w.Write([]byte(`{"code":20000,"data":{"message":"密码更新成功"}}`))
@@ -511,16 +523,34 @@ func (j *jsonapi) httpDeleteUser(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if checkrole(stb, []string{"admin"}) {
-		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"内置账号无法删除"}}`))
+	// 按 id 重新查库，以数据库中的真实用户为准（请求体中的其他字段不可信）
+	target, err := getuserByID(stb.ID)
+	if err != nil {
+		log.Println("user delete err : target not found, id:", stb.ID, err)
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"员工删除失败"}}`))
 		return
-
 	}
 
-	deleteUser(stb)
-	addOperatorLog(stb.String(), "用户删除成功", u)
+	if checkrole(target, []string{"admin"}) {
+		var otherAdmins int
+		if err := db.QueryRow("SELECT count(*) FROM users WHERE roles LIKE '%admin%' AND id<>?", target.ID).Scan(&otherAdmins); err != nil || otherAdmins == 0 {
+			w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"不能删除系统中最后一个管理员"}}`))
+			return
+		}
+	}
 
-	w.Write([]byte(`{"code":20000,"data":{"isok":0,"message":"员工删除成功成功"}}`))
+	if err := deleteUser(target); err != nil {
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"员工删除失败"}}`))
+		return
+	}
+
+	if isDefaultAdmin(target.ID) {
+		db.Exec("DELETE FROM meta WHERE key='default_admin_id'")
+		addOperatorLog("默认管理员已删除", "用户删除", u)
+	}
+	addOperatorLog(target.String(), "用户删除成功", u)
+
+	w.Write([]byte(`{"code":20000,"data":{"isok":0,"message":"用户删除成功"}}`))
 
 }
 
@@ -694,13 +724,16 @@ func (j *jsonapi) httpUserLogin(w http.ResponseWriter, req *http.Request) {
 		}
 
 		mustChangePwd := false
-		if user, err := getuser(stb.Username); err == nil && user.Routes == MustChangePwdFlag {
-			mustChangePwd = true
+		defaultAdmin := false
+		if user, err := getuser(stb.Username); err == nil {
+			mustChangePwd = user.MustChangePwd == 1
+			defaultAdmin = isDefaultAdmin(user.ID)
 		}
 
 		type loginData struct {
 			Token         string `json:"token"`
 			MustChangePwd bool   `json:"must_change_pwd"`
+			DefaultAdmin  bool   `json:"default_admin"`
 		}
 
 		res := &struct {
@@ -709,7 +742,7 @@ func (j *jsonapi) httpUserLogin(w http.ResponseWriter, req *http.Request) {
 			Message string    `json:"message"`
 		}{
 			Code:    20000,
-			Data:    loginData{Token: s, MustChangePwd: mustChangePwd},
+			Data:    loginData{Token: s, MustChangePwd: mustChangePwd, DefaultAdmin: defaultAdmin},
 			Message: "login ok",
 		}
 		rescode, _ := jsonextra.Marshal(res)
@@ -755,17 +788,14 @@ func (j *jsonapi) httpUserInfo(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if len(u.Roles) > 0 {
-		u.Routes = getRoleByKey(u.Roles[0]).Routes
-	}
-
-	mustChangePwd := u.Routes == MustChangePwdFlag
+	mustChangePwd := u.MustChangePwd == 1
 
 	rescode, _ := jsonextra.Marshal(struct {
 		*userinfo
 		BillingEnabled bool `json:"billing_enabled"`
 		MustChangePwd  bool `json:"must_change_pwd"`
-	}{u, billingEnabled(), mustChangePwd})
+		DefaultAdmin   bool `json:"default_admin"`
+	}{u, billingEnabled(), mustChangePwd, isDefaultAdmin(u.ID)})
 
 	respone := fmt.Sprintf(`{"code":20000,"data":%s}`, rescode)
 
