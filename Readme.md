@@ -782,6 +782,41 @@ id,name
 
 ---
 
+
+
+### 站点设置接口
+
+**GET /platform/site-settings**
+> 获取全部站点可配置项（无需登录，登录页消费）
+`json
+{"code":20000,"data":{"items":[
+  {"key":"platform_name","value":"NRL Test","updated_at":"2026-08-29 12:00:00"},
+  {"key":"icp","value":"粤ICP备00000000号","updated_at":"..."},
+  {"key":"tech_support","value":"技术支持：NRLLink","updated_at":"..."},
+  {"key":"copyright","value":"Copyright (c) 2026 NRLLink","updated_at":"..."}
+]}}
+`
+
+**POST /platform/site-settings/update**
+> 更新站点设置（仅管理员）
+`json
+// 单个更新
+{"key":"icp","value":"新备案号"}
+// 批量更新
+{"settings":{"icp":"新备案号","copyright":"(c) 2026 新版权"}}
+`
+
+### 服务器登记接口
+
+**POST /server/register**
+> 普通用户登记自己的服务器（需登录）
+`json
+{"name":"MyServer","ip_addr":"1.2.3.4","udp_port":"60051","server_type":2,"note":"备注"}
+`
+> 归属自动从 Token 中提取（ower_callsign/ower_id），状态默认 2（等待管理员审核）
+
+---
+
 ### 服务器管理接口
 
 **`POST /server/list`**
@@ -1460,6 +1495,17 @@ type query struct {
 | alt_text | TEXT | ALT文本 |
 | category | TEXT | 分类 |
 
+
+### site_settings - 站点设置表
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| key | TEXT PK | 设置键名（platform_name/logo_url/icp/tech_support/copyright/login_slogan/contact_mail/contact_callsign/language/cs_qr_url） |
+| value | TEXT NOT NULL | 设置值 |
+| updated_at | TEXT | 最后更新时间 |
+
+> 首次启动由 initSiteSettingTable() 幂等建表。读取回退 YAML 默认值，修改只改数据库。
+
 ### meta - 元数据表（引导状态）
 
 | 字段 | 类型 | 说明 |
@@ -1854,7 +1900,7 @@ goreleaser release --snapshot --clean
 
 | 层级 | 技术 |
 |------|------|
-| 语言 | Go 1.21+ |
+| 语言 | Go 1.24+ |
 | Web框架 | gorilla/mux |
 | WebSocket | gorilla/websocket |
 | 数据库 | SQLite3 (mattn/go-sqlite3) |
