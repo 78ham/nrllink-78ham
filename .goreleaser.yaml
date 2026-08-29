@@ -2,6 +2,15 @@ version: 2
 
 project_name: nrllink
 
+before:
+  hooks:
+    - apk add --no-cache gcc musl-dev pkgconf opus-dev opusfile-dev cmake make git
+    - git clone --depth 1 https://github.com/drowe67/codec2.git codec2-src
+    - mkdir -p codec2-src/build && cd codec2-src/build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(nproc)
+    - mkdir -p codec2/src/codec2 && cp codec2-src/src/*.h codec2/src/codec2/
+    - cp codec2-src/build/codec2/version.h codec2/src/codec2/version.h
+    - mkdir -p codec2/build/src && cp codec2-src/build/src/libcodec2.so* codec2/build/src/
+
 builds:
   - env: [CGO_ENABLED=1]
     goos:
