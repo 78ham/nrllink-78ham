@@ -131,15 +131,19 @@ nrllink-78ham/
 
 ### Docker
 
+镜像由 GitHub Actions 在推送到 `sqlite`/`main` 分支或打 `v*` tag 时自动构建并发布到 `ghcr.io/78ham/nrllink:latest`。
+
 ```bash
-docker pull 78ham/nrllink:latest
+docker pull ghcr.io/78ham/nrllink:latest
 docker run -d \
-  -p 80:80 \
+  -p 127.0.0.1:9000:9000 \
   -p 60050:60050/udp \
   -v /data:/nrllink/data \
   -v /conf:/nrllink/conf \
-  78ham/nrllink:latest
+  ghcr.io/78ham/nrllink:latest
 ```
+
+> 注意：9000 为管理 API，建议仅绑定 `127.0.0.1`（配合前端 Nginx 反代访问）；60050/UDP 为设备接入端口，需公网暴露。
 
 ### 直接运行
 

@@ -208,6 +208,14 @@ func (c *config) init() {
 	if conf.Bootstrap.DefaultAdminCallsign == "" {
 		conf.Bootstrap.DefaultAdminCallsign = "NOCALL"
 	}
+
+	// 环境变量覆盖，优先级高于配置文件
+	if v := os.Getenv("NRL_IPFILE"); v != "" {
+		conf.System.IPfile = v
+	}
+	if v := os.Getenv("NRL_WEBPATH"); v != "" {
+		conf.Web.Path = v
+	}
 }
 
 // Exist 判断文件存在

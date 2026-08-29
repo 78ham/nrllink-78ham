@@ -1,14 +1,17 @@
 services:
   nrllink:
-    image: 78ham/nrllink:latest
-    build: .
+    image: ghcr.io/78ham/nrllink:latest
     container_name: nrllink-server
     ports:
-      - "9000:9000"       # HTTP Web UI & API
-      - "60050:60050/udp" # UDP radio protocol
+      - "127.0.0.1:9000:9000"
+      - "60050:60050/udp"
+    environment:
+      - NRL_DBFILE=/nrllink/data/udphub.sqlite3
     volumes:
       - nrllink-data:/nrllink/data
       - ./udphub.yaml:/nrllink/udphub/udphub.yaml:ro
+    networks:
+      - nrllink-net
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/platform/info"]
@@ -17,6 +20,10 @@ services:
       retries: 3
       start_period: 10s
 
+networks:
+  nrllink-net:
+    name: nrllink-net
+    driver: bridge
+
 volumes:
   nrllink-data:
-

@@ -29,7 +29,12 @@ func main() {
 
 	dbip, err = ipdb.NewCity(conf.System.IPfile)
 	if err != nil {
-		log.Fatal(err)
+		if !Exist(conf.System.IPfile) {
+			// IP库缺失时降级运行（QTH定位不可用），不阻断启动
+			log.Printf("IP库文件不存在: %s，QTH定位功能不可用（可挂载 udphub.ipdb 并用 NRL_IPFILE 指定路径）", conf.System.IPfile)
+		} else {
+			log.Fatal(err)
+		}
 	}
 
 	setQTH("MEETLY-201", "会议模式", qth{"会议模式", "MEETLY-201", time.Now(), "多人同时讲话"})
