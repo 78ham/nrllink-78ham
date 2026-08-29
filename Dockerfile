@@ -4,6 +4,7 @@ RUN apk add --no-cache cmake g++ make git
 RUN git clone --depth 1 https://github.com/drowe67/codec2.git /codec2
 WORKDIR /codec2
 RUN mkdir build && cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(nproc)
+RUN mkdir -p /codec2/src/codec2 && cp /codec2/src/*.h /codec2/src/codec2/
 
 # ---- Stage 1: Build Go binary ----
 FROM golang:1.24-alpine AS builder
