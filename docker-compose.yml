@@ -1,13 +1,22 @@
 services:
   nrllink:
+    image: 78ham/nrllink:latest
     build: .
+    container_name: nrllink-server
     ports:
-      - "9000:9000"      # HTTP Web UI
-      - "60050:60050/udp"  # UDP protocol
+      - "9000:9000"       # HTTP Web UI & API
+      - "60050:60050/udp" # UDP radio protocol
     volumes:
       - nrllink-data:/nrllink/data
       - ./udphub.yaml:/nrllink/udphub/udphub.yaml:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/platform/info"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
 volumes:
   nrllink-data:
+

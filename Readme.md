@@ -132,13 +132,13 @@ nrllink-78ham/
 ### Docker
 
 ```bash
-docker pull hicaoc/nrllink:latest
+docker pull 78ham/nrllink:latest
 docker run -d \
   -p 80:80 \
   -p 60050:60050/udp \
   -v /data:/nrllink/data \
   -v /conf:/nrllink/conf \
-  hicaoc/nrllink:latest
+  78ham/nrllink:latest
 ```
 
 ### 直接运行
@@ -1813,7 +1813,7 @@ docker run -d \
   -p 80:80 -p 60050:60050/udp \
   -e NRL_DBFILE=/nrllink/data/udphub.sqlite3 \
   -v /data:/nrllink/data -v /conf:/nrllink/conf \
-  hicaoc/nrllink:latest
+  78ham/nrllink:latest
 ```
 
 ### 首次启动与默认管理员流程
@@ -1891,7 +1891,7 @@ goreleaser release --snapshot --clean
 - Linux amd64/arm64
 - Windows amd64/arm64
 - macOS amd64/arm64 (Darwin)
-- Docker镜像: `ghcr.io/hicaoc/nrllink`
+- Docker镜像: `ghcr.io/78ham/nrllink`
 - 系统包: deb/rpm/apk
 
 ---

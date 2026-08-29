@@ -14,8 +14,8 @@ builds:
 
 dockers:
   - image_templates:
-      - "ghcr.io/hicaoc/nrllink:{{ .Version }}"
-      - "ghcr.io/hicaoc/nrllink:latest"
+      - "ghcr.io/78ham/nrllink:{{ .Version }}"
+      - "ghcr.io/78ham/nrllink:latest"
     dockerfile: Dockerfile
     build_flag_templates:
       - --label=org.opencontainers.image.title={{ .ProjectName }}
