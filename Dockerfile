@@ -20,7 +20,6 @@ RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o udphub .
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata opus opusfile
 COPY --from=codec2build /codec2/build/src/libcodec2.so* /usr/lib/
-RUN ldconfig /usr/lib
 RUN mkdir -p /nrllink/udphub /nrllink/data /nrllink/conf
 COPY --from=builder /app/udphub /nrllink/udphub/udphub
 COPY start.sh /nrllink/start.sh
