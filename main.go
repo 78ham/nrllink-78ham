@@ -44,6 +44,7 @@ func main() {
 	execDDL()
 
 	updatedb()
+	initRolesTable()
 	initSiteSettingTable()
 	initHomepageTables()
 

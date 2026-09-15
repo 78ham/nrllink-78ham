@@ -80,7 +80,7 @@ type role struct {
 func getRoles(query string) []*role {
 	rl := []*role{}
 
-	q := fmt.Sprintf("SELECT * FROM roles %v ", query)
+	q := fmt.Sprintf("SELECT id, name_key, name, description, COALESCE(routes, '') FROM roles %v ", query)
 
 	rows, err := db.Query(q)
 
@@ -125,8 +125,8 @@ func getRoleByKey(key string) *role {
 
 	r := &role{}
 
-	row := db.QueryRow("SELECT * from roles where name_key=?", key)
-	err := row.Scan(&r.ID, &r.Name, &r.Name, &r.Description, &r.Routes)
+	row := db.QueryRow("SELECT id, name_key, name, description, COALESCE(routes, '') from roles where name_key=?", key)
+	err := row.Scan(&r.ID, &r.NameKey, &r.Name, &r.Description, &r.Routes)
 	if err != nil {
 		log.Println("query role by key err:", err, r, key)
 	}

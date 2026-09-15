@@ -205,7 +205,7 @@ func execDDL() {
 			"name_key"	TEXT,
 			"name"	TEXT,
 			"description"	TEXT,
-			"routess"	TEXT,
+			"routes"	TEXT,
 			PRIMARY KEY("id" AUTOINCREMENT)
 		)`,
 		`CREATE TABLE IF NOT EXISTS "operator_log" (
@@ -312,6 +312,67 @@ func execDDL() {
 	}
 }
 
+// initRolesTable 修复 roles 表的历史遗留问题，必须在 ensureBootstrap() 之前调用。
+//
+// 背景：DDL 早期把列名拼成了 routess，而查询侧按 routes 读取；seedRoles 插入时
+// 又没给 routes 赋值，导致 NULL 写入。两者叠加会让 getRoles 在 rows.Scan 时
+// 报 "converting NULL to string is unsupported"，整行被 continue 掉，接口返回
+// 空数组，前端角色下拉框就显示"无数据"。
+//
+// 这里做三件事（全部幂等）：
+//  1. 老库若只有 routess 列，重命名为 routes；
+//  2. 补齐缺失的 routes 列（极端情况）；
+//  3. 把 routes 的 NULL 值刷成空串，避免 Scan 失败。
+func initRolesTable() {
+	var tblCount int
+	if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='roles'").Scan(&tblCount); err != nil || tblCount == 0 {
+		return
+	}
+
+	cols := map[string]bool{}
+	rows, err := db.Query("PRAGMA table_info(roles)")
+	if err != nil {
+		log.Printf("[roles] read table_info error: %v", err)
+		return
+	}
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			ctype      string
+			notNull    int
+			defaultVal any
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &defaultVal, &pk); err != nil {
+			continue
+		}
+		cols[name] = true
+	}
+	rows.Close()
+
+	if cols["routess"] && !cols["routes"] {
+		if _, err := db.Exec("ALTER TABLE roles RENAME COLUMN routess TO routes"); err != nil {
+			log.Printf("[roles] rename routess -> routes error: %v", err)
+		} else {
+			log.Println("[roles] 已将 roles.routess 重命名为 roles.routes")
+			cols["routes"] = true
+		}
+	}
+
+	if !cols["routes"] {
+		if _, err := db.Exec("ALTER TABLE roles ADD COLUMN routes TEXT DEFAULT ''"); err != nil {
+			log.Printf("[roles] add routes column error: %v", err)
+		} else {
+			log.Println("[roles] 已补齐 roles.routes 列")
+		}
+	}
+
+	if _, err := db.Exec("UPDATE roles SET routes='' WHERE routes IS NULL"); err != nil {
+		log.Printf("[roles] fill NULL routes error: %v", err)
+	}
+}
+
 func seedRoles() {
 	roleDefs := []struct {
 		Key         string
@@ -329,7 +390,7 @@ func seedRoles() {
 		if count > 0 {
 			continue
 		}
-		_, err := db.Exec("INSERT INTO roles (name_key, name, description) VALUES (?, ?, ?)",
+		_, err := db.Exec("INSERT INTO roles (name_key, name, description, routes) VALUES (?, ?, ?, ' ')",
 			r.Key, r.Name, r.Description)
 		if err != nil {
 			log.Printf("[bootstrap] seed role %s error: %v", r.Key, err)
