@@ -37,8 +37,8 @@ func createRegUser(e *reguser) error {
 	}
 
 	// 插入用户数据到数据库
-	query := `INSERT INTO registers (callsign, name, phone,sex,address,birthday,mail, password, op_cert_path, license_path, status,note) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO registers (callsign, name, phone,sex,address,birthday,mail, password, op_cert_path, license_path, status,note,create_time,update_time) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	stmt, err := db.Prepare(query)
 
@@ -48,7 +48,7 @@ func createRegUser(e *reguser) error {
 	}
 	defer stmt.Close()
 
-	res, err := stmt.Exec(e.CallSign, e.Name, e.Phone, e.Sex, e.Address, e.Birthday, e.Mail, password, e.OpCertPath, e.LicensePath, e.Status, e.Note)
+	res, err := stmt.Exec(e.CallSign, e.Name, e.Phone, e.Sex, e.Address, e.Birthday, e.Mail, password, e.OpCertPath, e.LicensePath, e.Status, e.Note, e.CreateTime, e.UpdateTime)
 	if err != nil {
 		log.Println("add reg user failed 2, ", err, '\n', query)
 
@@ -84,11 +84,11 @@ func selectReguser(w string, args []interface{}, p string, sort string) ([]regus
 	emp := []reguser{}
 
 	query := fmt.Sprintf(`SELECT 
-	 id,name,phone,address,sex,
-	 callsign,status,
-	 op_cert_path,license_path, 
-	 birthday,sex,address,mail,note, 
-	 create_time,update_time FROM registers  %v %v %v  `, w, sort, p)
+	 id,COALESCE(name,''),COALESCE(phone,''),COALESCE(address,''),COALESCE(sex,0),
+	 COALESCE(callsign,''),COALESCE(status,1),
+	 COALESCE(op_cert_path,''),COALESCE(license_path,''), 
+	 COALESCE(birthday,''),COALESCE(mail,''),COALESCE(note,''), 
+	 COALESCE(create_time,''),COALESCE(update_time,'') FROM registers  %v %v %v  `, w, sort, p)
 
 	//fmt.Println(query)
 
@@ -108,7 +108,7 @@ func selectReguser(w string, args []interface{}, p string, sort string) ([]regus
 		err := rows.Scan(&r.ID, &r.Name, &r.Phone, &r.Address, &r.Sex,
 			&r.CallSign, &r.Status,
 			&r.OpCertPath, &r.LicensePath,
-			&r.Birthday, &r.Sex, &r.Address, &r.Mail, &r.Note,
+			&r.Birthday, &r.Mail, &r.Note,
 			&r.CreateTime, &r.UpdateTime,
 		)
 		if err != nil {
@@ -285,9 +285,8 @@ func updateRegUser(e *reguser) error {
 	name=?,phone=?,sex=?,callsign=?,	
 	address=?,birthday=?,mail=?,
 	status=?,note=?,
-	create_time=CURRENT_TIMESTAMP,
-	update_time=CURRENT_TIMESTAMP,
-	 where id=?`,
+	update_time=CURRENT_TIMESTAMP
+	where id=?`,
 		e.Name, e.Phone, e.Sex, e.CallSign, e.Address, e.Birthday, e.Mail, e.Status, e.Note, e.ID)
 	if err != nil {
 		log.Println("update reg user failed, ", err)

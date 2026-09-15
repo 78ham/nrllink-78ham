@@ -45,6 +45,7 @@ func main() {
 
 	updatedb()
 	initRolesTable()
+	initRegistersTable()
 	initSiteSettingTable()
 	initHomepageTables()
 

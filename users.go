@@ -44,7 +44,7 @@ func (j *jsonapi) httpUserAllList(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if !checkrole(u, []string{"admin", "ham"}) {
-		w.Write([]byte(`{"code":20000,"data":{"message":"当前用户没有权限设置此参数"}}`))
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"当前用户没有权限设置此参数"}}`))
 		return
 
 	}
@@ -279,24 +279,24 @@ func (j *jsonapi) httpUpdateUser(w http.ResponseWriter, req *http.Request) {
 
 	if err != nil {
 		log.Println("update user  err :", err)
-		w.Write([]byte(`{"code":20000,"data":{"message":"账号操作失败"}}`))
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"账号操作失败"}}`))
 		return
 	}
 
 	if !checkrole(u, []string{"master", "admin"}) {
-		w.Write([]byte(`{"code":20000,"data":{"message":"当前用户没有权限设置此参数"}}`))
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"当前用户没有权限设置此参数"}}`))
 		return
 	}
 
 	stb.MDCID = strings.ToUpper(strings.TrimSpace(stb.MDCID))
 	if stb.MDCID != "" && !isValidMDCID(stb.MDCID) {
-		w.Write([]byte(`{"code":20000,"data":{"message":"MDC ID 必须是 4 位十六进制字符串"}}`))
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"MDC ID 必须是 4 位十六进制字符串"}}`))
 		return
 	}
 
 	stb.DMRID = strings.TrimSpace(stb.DMRID)
 	if !isValidDMRID(stb.DMRID) {
-		w.Write([]byte(`{"code":20000,"data":{"message":"DMR ID 必须是 0 到 4294967295 之间的整数"}}`))
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"DMR ID 必须是 0 到 4294967295 之间的整数"}}`))
 		return
 	}
 
@@ -310,17 +310,31 @@ func (j *jsonapi) httpUpdateUser(w http.ResponseWriter, req *http.Request) {
 		if !checkrole(stb, []string{"admin"}) || stb.Status != 1 {
 			var otherAdmins int
 			if err := db.QueryRow("SELECT count(*) FROM users WHERE roles LIKE '%admin%' AND id<>?", stb.ID).Scan(&otherAdmins); err != nil || otherAdmins == 0 {
-				w.Write([]byte(`{"code":20000,"data":{"message":"不能禁用或降级系统中最后一个管理员"}}`))
+				w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"不能禁用或降级系统中最后一个管理员"}}`))
 				return
 			}
 		}
 	}
 
 	//stb.Area = u.Area
-	updateUser(stb)
+	if err := updateUser(stb); err != nil {
+		log.Println("update user failed:", err)
+		msg := "员工信息更新失败：" + err.Error()
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			switch {
+			case strings.Contains(err.Error(), "users.phone"):
+				msg = "员工信息更新失败，该手机号码已经被其他用户使用"
+			case strings.Contains(err.Error(), "users.callsign"):
+				msg = "员工信息更新失败，该呼号已经被其他用户使用"
+			}
+		}
+		resp, _ := jsonextra.Marshal(Response{Code: 20000, Data: map[string]any{"isok": 1, "message": msg}})
+		w.Write(resp)
+		return
+	}
 
 	addOperatorLog(stb.String(), "修改用户信息成功", u)
-	w.Write([]byte(`{"code":20000,"data":{"message":"员工信息更新成功"}}`))
+	w.Write([]byte(`{"code":20000,"data":{"isok":0,"message":"员工信息更新成功"}}`))
 
 }
 
@@ -341,24 +355,24 @@ func (j *jsonapi) httpUpdateUserProfile(w http.ResponseWriter, req *http.Request
 	err = jsonextra.Unmarshal(result, &stb)
 	if err != nil {
 		log.Println("update user profile err :", err)
-		w.Write([]byte(`{"code":20000,"data":{"message":"账号操作失败"}}`))
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"账号操作失败"}}`))
 		return
 	}
 
 	if u.ID != stb.ID {
-		w.Write([]byte(`{"code":20000,"data":{"message":"当前用户没有权限设置此参数"}}`))
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"当前用户没有权限设置此参数"}}`))
 		return
 	}
 
 	stb.MDCID = strings.ToUpper(strings.TrimSpace(stb.MDCID))
 	if stb.MDCID != "" && !isValidMDCID(stb.MDCID) {
-		w.Write([]byte(`{"code":20000,"data":{"message":"MDC ID 必须是 4 位十六进制字符串"}}`))
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"MDC ID 必须是 4 位十六进制字符串"}}`))
 		return
 	}
 
 	stb.DMRID = strings.TrimSpace(stb.DMRID)
 	if !isValidDMRID(stb.DMRID) {
-		w.Write([]byte(`{"code":20000,"data":{"message":"DMR ID 必须是 0 到 4294967295 之间的整数"}}`))
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"DMR ID 必须是 0 到 4294967295 之间的整数"}}`))
 		return
 	}
 
@@ -391,7 +405,7 @@ func (j *jsonapi) httpUpdateUserAvatar(w http.ResponseWriter, req *http.Request)
 
 	if err != nil {
 		log.Println("update user  err :", err)
-		w.Write([]byte(`{"code":20000,"data":{"message":"账号操作失败"}}`))
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"账号操作失败"}}`))
 		return
 	}
 
@@ -429,7 +443,7 @@ func (j *jsonapi) httpUpdateUserPassword(w http.ResponseWriter, req *http.Reques
 
 	if err != nil {
 		log.Println("update user  err :", err)
-		w.Write([]byte(`{"code":20000,"data":{"message":"账号操作失败"}}`))
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"账号操作失败"}}`))
 		return
 	}
 
@@ -463,7 +477,7 @@ func (j *jsonapi) httpAddUser(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if !checkrole(u, []string{"admin"}) {
-		w.Write([]byte(`{"code":20000,"data":{"message":"当前用户没有权限设置此参数"}}`))
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"当前用户没有权限设置此参数"}}`))
 		return
 
 	}
@@ -482,11 +496,20 @@ func (j *jsonapi) httpAddUser(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if addUser(stb) != nil {
-
-		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"新增用户失败，可能手机号码已经存在"}}`))
+	if err := addUser(stb); err != nil {
+		log.Println("add user failed:", err)
+		msg := "新增用户失败：" + err.Error()
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			switch {
+			case strings.Contains(err.Error(), "users.phone"):
+				msg = "新增用户失败，该手机号码已经存在"
+			case strings.Contains(err.Error(), "users.callsign"):
+				msg = "新增用户失败，该呼号已经存在"
+			}
+		}
+		resp, _ := jsonextra.Marshal(Response{Code: 20000, Data: map[string]any{"isok": 1, "message": msg}})
+		w.Write(resp)
 		return
-
 	}
 
 	addOperatorLog(stb.String(), "新增用户信息成功", u)

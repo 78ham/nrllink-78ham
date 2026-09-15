@@ -236,14 +236,19 @@ func execDDL() {
 			"routes"	TEXT,
 			PRIMARY KEY("id" AUTOINCREMENT)
 		)`,
-		`CREATE TABLE IF NOT EXISTS "user_reg" (
+		`CREATE TABLE IF NOT EXISTS "registers" (
 			"id"	INTEGER UNIQUE,
 			"name"	TEXT,
-			"callsign"	TEXT,
+			"callsign"	TEXT UNIQUE,
 			"phone"	TEXT,
 			"password"	TEXT,
-			"image"	BLOB,
-			"status"	INTEGER,
+			"address"	TEXT,
+			"mail"	TEXT,
+			"birthday"	TEXT,
+			"sex"	INTEGER,
+			"op_cert_path"	TEXT,
+			"license_path"	TEXT,
+			"status"	INTEGER DEFAULT 1,
 			"create_time"	TEXT,
 			"update_time"	TEXT,
 			"note"	TEXT,
@@ -370,6 +375,125 @@ func initRolesTable() {
 
 	if _, err := db.Exec("UPDATE roles SET routes='' WHERE routes IS NULL"); err != nil {
 		log.Printf("[roles] fill NULL routes error: %v", err)
+	}
+}
+
+// initRegistersTable 修复用户注册表的历史遗留问题，必须在 ensureBootstrap() 之前调用。
+//
+// 背景：代码里增删改查用的都是 registers 表，而 DDL 重构时把建表语句写成了
+// user_reg，列结构（image、没有 address/mail/op_cert_path/license_path）
+// 与代码完全对不上。结果是 POST /user/reg/create 在 db.Prepare 阶段就报
+// "no such table: registers"，注册记录一条都写不进去，后台注册列表永远为空。
+//
+// 这里做三件事（全部幂等）：
+//  1. 老库若只有 user_reg（历史误建）则重命名为 registers；
+//  2. 补齐代码需要的所有列；
+//  3. 把文本列的 NULL 刷成空串，避免 Scan 失败。
+func initRegistersTable() {
+	tableExists := func(name string) bool {
+		var n int
+		if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", name).Scan(&n); err != nil {
+			return false
+		}
+		return n > 0
+	}
+
+	hasRegisters := tableExists("registers")
+	hasLegacy := tableExists("user_reg")
+
+	// 老部署若只有误建的 user_reg，直接整表改名，数据不丢。
+	if !hasRegisters && hasLegacy {
+		if _, err := db.Exec("ALTER TABLE user_reg RENAME TO registers"); err != nil {
+			log.Printf("[registers] rename user_reg -> registers error: %v", err)
+			return
+		}
+		log.Println("[registers] 已将历史误建的 user_reg 重命名为 registers")
+		hasRegisters = true
+		hasLegacy = false
+	}
+
+	if !hasRegisters {
+		return
+	}
+
+	cols := map[string]bool{}
+	rows, err := db.Query("PRAGMA table_info(registers)")
+	if err != nil {
+		log.Printf("[registers] read table_info error: %v", err)
+		return
+	}
+	for rows.Next() {
+		var (
+			cid        int
+			name       string
+			ctype      string
+			notNull    int
+			defaultVal any
+			pk         int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notNull, &defaultVal, &pk); err != nil {
+			continue
+		}
+		cols[name] = true
+	}
+	rows.Close()
+
+	needed := []struct{ name, decl string }{
+		{"address", "TEXT DEFAULT ''"},
+		{"mail", "TEXT DEFAULT ''"},
+		{"birthday", "TEXT DEFAULT ''"},
+		{"sex", "INTEGER DEFAULT 0"},
+		{"op_cert_path", "TEXT DEFAULT ''"},
+		{"license_path", "TEXT DEFAULT ''"},
+		{"status", "INTEGER DEFAULT 1"},
+		{"create_time", "TEXT DEFAULT ''"},
+		{"update_time", "TEXT DEFAULT ''"},
+		{"note", "TEXT DEFAULT ''"},
+	}
+	for _, c := range needed {
+		if cols[c.name] {
+			continue
+		}
+		if _, err := db.Exec("ALTER TABLE registers ADD COLUMN " + c.name + " " + c.decl); err != nil {
+			log.Printf("[registers] add column %s error: %v", c.name, err)
+		} else {
+			log.Printf("[registers] 已补齐 registers.%s 列", c.name)
+		}
+	}
+
+	// 两个表同时存在的场景（老库误建 user_reg + 新版 execDDL 新建空 registers）：
+	// 把 user_reg 里已有数据搬到 registers，否则老注册记录在后台列表里会消失。
+	if hasLegacy {
+		var legacyCount, newCount int
+		_ = db.QueryRow("SELECT count(*) FROM user_reg").Scan(&legacyCount)
+		_ = db.QueryRow("SELECT count(*) FROM registers").Scan(&newCount)
+		if legacyCount > 0 && newCount == 0 {
+			if _, err := db.Exec(`INSERT INTO registers
+				(name, callsign, phone, password, op_cert_path, license_path, status, create_time, update_time, note)
+				SELECT COALESCE(name,''), COALESCE(callsign,''), COALESCE(phone,''), COALESCE(password,''),
+					'', '', COALESCE(status,1), COALESCE(create_time,''), COALESCE(update_time,''), COALESCE(note,'')
+				FROM user_reg`); err != nil {
+				log.Printf("[registers] migrate user_reg -> registers error: %v", err)
+			} else {
+				log.Printf("[registers] 已从 user_reg 搬迁 %d 条历史注册记录", legacyCount)
+			}
+		}
+	}
+
+	if _, err := db.Exec(`UPDATE registers SET
+		name=COALESCE(name,''), callsign=COALESCE(callsign,''), phone=COALESCE(phone,''),
+		password=COALESCE(password,''), address=COALESCE(address,''), mail=COALESCE(mail,''),
+		birthday=COALESCE(birthday,''), sex=COALESCE(sex,0),
+		op_cert_path=COALESCE(op_cert_path,''), license_path=COALESCE(license_path,''),
+		status=COALESCE(status,1), create_time=COALESCE(create_time,''),
+		update_time=COALESCE(update_time,''), note=COALESCE(note,'')`); err != nil {
+		log.Printf("[registers] fill NULL error: %v", err)
+	}
+
+	// 呼号唯一：重复提交同一呼号时 createRegUser 会走"更新证照路径"分支，
+	// 而不是插入重复记录。老库若已有重复数据则该索引创建失败，仅告警不影响启动。
+	if _, err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_registers_callsign_unique ON registers(callsign)"); err != nil {
+		log.Printf("[registers] create callsign unique index skipped: %v", err)
 	}
 }
 
