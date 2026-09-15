@@ -132,21 +132,69 @@ nrllink-78ham/
 ### Docker
 
 镜像由 GitHub Actions 在推送到 `sqlite`/`main` 分支或打 `v*` tag 时自动构建并发布到 `ghcr.io/78ham/nrllink:latest`。
+镜像**只含后端服务**，自带一份中性的默认配置，开箱即可提供接口、WebSocket 与设备接入。
+
+> **前端说明**：本仓库的 `www/` 是开发用的测试前端，**不随镜像分发**。
+> 生产前端请用 [nrllink-web-78ham](https://github.com/78ham/nrllink-web-78ham) 仓库的编排，
+> 它会把完整前端产物挂到 `/nrllink/www`，页面 / 接口 / WebSocket 同源，无需 nginx 转发。
+
+推荐用后端仓库自带的 compose：
 
 ```bash
-docker pull ghcr.io/78ham/nrllink:latest
+cp .env.example .env    # 按需改端口 / 镜像地址 / TOKEN_KEY
+docker compose up -d
+```
+
+服务器上也可以一行起步（自动下载编排文件到 `./nrllink` 并启动）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/78ham/nrllink-78ham/sqlite/install.sh | sh
+```
+
+等价的手工 `docker run`：
+
+```bash
 docker run -d \
+  --name nrllink-server \
   -p 127.0.0.1:9000:9000 \
   -p 60050:60050/udp \
-  -v /data:/nrllink/data \
-  -v /conf:/nrllink/conf \
+  -e NRL_DBFILE=/nrllink/data/udphub.sqlite3 \
+  -e NRL_WEBPATH=/nrllink/www \
+  -e NRL_TOKEN_KEY=改成你自己的随机字符串 \
+  -v nrllink-data:/nrllink/data \
+  -v nrllink-uploads:/nrllink/www/uploads \
   ghcr.io/78ham/nrllink:latest
 ```
 
-> 注意：9000 为管理 API，建议仅绑定 `127.0.0.1`（配合前端 Nginx 反代访问）；60050/UDP 为设备接入端口，需公网暴露。
+> 9000 提供接口、WebSocket 和上传图片，默认只绑定 `127.0.0.1`，对外 HTTPS / 域名请自行在前方加反向代理指向 `127.0.0.1:9000`；60050/UDP 为设备接入端口，需公网暴露，不能走 HTTP 反向代理。
+
+首次部署的默认管理员密码会打印在容器日志里：
+
+```bash
+docker compose logs nrllink | grep -A3 "默认管理员"
+```
+
+### 配置
+
+镜像内置一份中性默认配置（见 `docker/udphub.default.yaml`）：平台名等为通用值，**APRS 默认关闭**（避免沿用他人呼号上报）。
+
+- 想改平台名 / ICP / APRS / 微信 / 计费等：准备一份 `config/udphub.yaml`，在 `docker-compose.yml` 里取消对应的挂载注释，启动脚本会优先加载 `/nrllink/conf/udphub.yaml`。
+- 常用项可以直接用环境变量覆盖，无需改配置：`NRL_DBFILE`、`NRL_WEBPATH`、`NRL_IPFILE`、`NRL_TOKEN_KEY`（JWT 签名密钥，**生产务必设置**，否则每次重启登录态失效）。
+
+### 开发用测试前端（www/）
+
+仓库根的 `www/` 是一个精简的测试前端（Vue 3 + Vite + Naive UI + PWA），用于本地联调后端接口，**不随 Docker 镜像分发**。
+
+```bash
+cd www
+npm install
+npm run dev      # Vite 会把 /api、/ws 代理到 http://localhost:9000
+npm run build    # 输出 www/dist/
+```
+
+要临时看页面，把 `www/dist/` 挂到容器的 `/nrllink/www` 即可；正式部署请用 nrllink-web 仓库。
 
 ### 直接运行
-
 ```bash
 # 编译
 go build -o nrllink .
@@ -1534,7 +1582,7 @@ system:
 
 web:
   path: /nrllink/www        # 前端静态文件路径
-  port: 9000                # HTTP端口(内部,对外通过nginx 443)
+  port: 9000                # HTTP端口(内部,对外由你的反向代理转发)
   tokenkey: "nrl1234"       # JWT签名密钥(重启不掉线)
   icp: "皖ICP备2022007119号" # ICP备案号
   sslcrt: ""                # SSL证书路径(可选直连HTTPS)
@@ -1814,10 +1862,13 @@ getDB()              # 打开数据库（父目录/文件不存在时自动创�
 
 ```bash
 docker run -d \
-  -p 80:80 -p 60050:60050/udp \
+  -p 127.0.0.1:9000:9000 -p 60050:60050/udp \
   -e NRL_DBFILE=/nrllink/data/udphub.sqlite3 \
-  -v /data:/nrllink/data -v /conf:/nrllink/conf \
-  78ham/nrllink:latest
+  -e NRL_WEBPATH=/nrllink/www \
+  -v nrllink-data:/nrllink/data \
+  -v nrllink-uploads:/nrllink/www/uploads \
+  -v "$PWD/udphub.yaml:/nrllink/udphub/udphub.yaml:ro" \
+  ghcr.io/78ham/nrllink:latest
 ```
 
 ### 首次启动与默认管理员流程
@@ -1857,31 +1908,53 @@ sqlite3 udphub.sqlite3 "UPDATE users SET must_change_pwd=1, routes='' WHERE rout
 
 | 端口 | 协议 | 用途 |
 |------|------|------|
-| 80 | TCP | Web管理后台(内部, 经nginx代理) |
-| 443 | TCP | Web访问入口(nginx HTTPS反代→80) |
-| 60050 | UDP | 设备语音/控制/心跳信令 |
+| 9000 | TCP | Web 管理后台 + 接口 + WebSocket（内部，建议只绑 `127.0.0.1`，对外由你的反向代理转发） |
+| 60050 | UDP | 设备语音/控制/心跳信令（需公网直接放通，不能走 HTTP 反向代理） |
 
-### nginx 反向代理配置示例
+### 反向代理配置示例
+
+服务本身不包含反向代理，对外 HTTPS / 域名由你自备的 Nginx / Caddy / Traefik 处理，全部转发到 `127.0.0.1:9000` 即可。
+
+Nginx：
 
 ```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
 server {
     listen 443 ssl http2;
     server_name your-domain.com;
-    ssl_certificate /path/to/cert.pem;
+    ssl_certificate     /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
+
+    client_max_body_size 20m;
 
     location / {
         proxy_pass http://127.0.0.1:9000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # WebSocket支持
         proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # WebSocket（/ws、/ws/calls 语音监控必需）
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+
+        proxy_read_timeout 86400s;
+        proxy_buffering    off;
     }
+}
+```
+
+Caddy（自动签发证书，配置最省）：
+
+```caddyfile
+your-domain.com {
+    encode gzip
+    reverse_proxy 127.0.0.1:9000
 }
 ```
 

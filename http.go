@@ -12,7 +12,6 @@ import (
 	// _ "net/http/pprof"
 	// "github.com/jmoiron/sqlx"
 
-	"github.com/gorilla/mux"
 	jsoniter "github.com/json-iterator/go"
 
 	"golang.org/x/net/websocket"
@@ -229,21 +228,20 @@ func allowWebsocketHandshake(config *websocket.Config, req *http.Request) error 
 
 func (j *jsonapi) msghttp() {
 
-	router := mux.NewRouter()
-
-	router.HandleFunc("/api/msg/weixin", j.httpWXMsg)               //微信公众号接口
-	router.HandleFunc("/weixinreturn/msgstatus", j.httpWXMsgReturn) //微信回调
-	router.HandleFunc("/weixin/phonecode", j.httpPhoneCode)         //crm自己处理操作员的过来的绑定请求
-	router.HandleFunc("/weixin/mpphonecode", j.httpMPPhoneCode)     //crm自己处理微信小程序后端的过来的绑定请求
-	router.HandleFunc("/weixin/wxmsg", j.httpgetWeiXinMsg)          //查询微信用户发过来的消息
-	router.HandleFunc("/api/getwxmsg", j.httpGetWeiXinMsgContent)
-
-	//小程序登录
-	router.HandleFunc("/api/weixin/wxlogin/teacher", j.httpMPuserLogin)
-
+	// 微信相关接口直接注册到默认 mux。
+	// 注意：这里必须用 http.HandleFunc，之前用独立的 mux.NewRouter() 建了路由却没挂载，
+	// 导致这批接口全部 404。
 	registerRoute := func(pattern string, handler func(http.ResponseWriter, *http.Request)) {
 		http.HandleFunc(pattern, handler)
 	}
+
+	registerRoute("/api/msg/weixin", j.httpWXMsg)               //微信公众号接口
+	registerRoute("/weixinreturn/msgstatus", j.httpWXMsgReturn) //微信回调
+	registerRoute("/weixin/phonecode", j.httpPhoneCode)         //crm自己处理操作员的过来的绑定请求
+	registerRoute("/weixin/mpphonecode", j.httpMPPhoneCode)     //crm自己处理微信小程序后端的过来的绑定请求
+	registerRoute("/weixin/wxmsg", j.httpgetWeiXinMsg)          //查询微信用户发过来的消息
+	registerRoute("/api/getwxmsg", j.httpGetWeiXinMsgContent)
+	registerRoute("/api/weixin/wxlogin/teacher", j.httpMPuserLogin) //小程序登录
 
 	registerRoute("/platform/info", j.httpplatforminfo)
 	registerRoute("/platform/list", j.httpplatformList)
@@ -367,6 +365,20 @@ func (j *jsonapi) msghttp() {
 	api("/platform/info", j.httpplatforminfo)
 	api("/platform/site-settings", j.httpSiteSettings)
 	api("/platform/site-settings/update", j.httpSiteSettingsUpdate)
+
+	// 首页 CMS 别名层：前端调用的路径带 /api 与 /api/admin 前缀，
+	// 这里一并注册，避免前台首页公告 / 板块 / 图片接口 404。
+	registerRoute("/api/homepage/sections", j.httpHomepageSections)
+	registerRoute("/api/homepage/announcements", j.httpHomepageAnnouncements)
+	registerRoute("/api/admin/homepage/sections", j.httpAdminHomepageSections)
+	registerRoute("/api/admin/homepage/sections/update", j.httpAdminHomepageSectionsUpdate)
+	registerRoute("/api/admin/homepage/sections/delete", j.httpAdminHomepageSectionsDelete)
+	registerRoute("/api/admin/homepage/announcements/create", j.httpAdminHomepageAnnouncementsCreate)
+	registerRoute("/api/admin/homepage/announcements/update", j.httpAdminHomepageAnnouncementsUpdate)
+	registerRoute("/api/admin/homepage/announcements/delete", j.httpAdminHomepageAnnouncementsDelete)
+	registerRoute("/api/admin/homepage/images/upload", j.httpAdminHomepageImageUpload)
+	registerRoute("/api/admin/homepage/images/list", j.httpAdminHomepageImageList)
+	registerRoute("/api/admin/homepage/images/delete", j.httpAdminHomepageImageDelete)
 
 	//http.HandleFunc("/login", j.httplogin)
 	//http.HandleFunc("/reg", j.httpreg)

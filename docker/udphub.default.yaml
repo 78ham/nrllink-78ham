@@ -1,0 +1,59 @@
+# 镜像内置的默认配置（中性模板）。
+# 想用自己的平台名 / ICP / APRS / 微信 / 计费等，把自定义配置挂到
+# /nrllink/conf/udphub.yaml，启动脚本会优先加载它。
+System:
+    Port: "60050"
+    LogPath: ""
+    DBfile: /nrllink/udphub.sqlite3
+    IPfile: /nrllink/udphub.ipdb
+Web:
+    Path: /nrllink/www
+    Port: "9000"
+    # 留空则由程序在启动时随机生成，重启后登录态失效。
+    # 生产请在 .env 里设置 TOKEN_KEY（compose 会通过 NRL_TOKEN_KEY 传入）。
+    Token_Key: ""
+    ICP: ""
+    SSLCrt: ""
+    SSLKey: ""
+SystemInfo:
+    Name: NRL无线电网络互联系统
+    NameShorthand: 火链
+    LogoURL: ""
+OpenAI:
+    BaseURL: ""
+    APIKEY: ""
+    Engine: ""
+# APRS 默认关闭：四项任一为空即不启动上报。
+# 部署者请填自己的呼号 / 位置，不要沿用他人信息。
+APRS:
+    APRSServerHost: ""
+    APRSServerPort: ""
+    SelfAddress: ""
+    SelfPort: "60050"
+    CallSign: ""
+    SSID: ""
+    Passcode: 0
+    Latitude: 0
+    Longitude: 0
+    Altitude: ""
+WeiXin:
+    PhoneCodeURL: ""
+    AvatarURL: ""
+    ServerURL: ""
+    WeixinAPIURL: ""
+    WxMsgURL: ""
+    AlarmModeID: ""
+Billing:
+    Enabled: false
+    AccountExpireRecheckSecs: 300
+    PackageUnitPriceCents: 0
+    NotifyURL: ""
+    WechatPay:
+        AppID: ""
+        MchID: ""
+        APIv3Key: ""
+        SerialNo: ""
+        PrivateKeyPath: ""
+        NotifyURL: ""
+        Description: ""
+PlatformList: []

@@ -19,11 +19,18 @@ COPY --from=codec2build /codec2/build/src/ /app/codec2/build/src/
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o udphub .
 
 # ---- Stage 2: Runtime ----
+# 本镜像只含后端服务，不打包前端：
+#   - 生产前端用 nrllink-web 仓库，产物挂到 /nrllink/www
+#   - 本仓库的 www/ 只是开发用测试前端，不随镜像分发
+# 镜像内置一份默认 udphub.yaml，开箱即可运行；
+# 想自定义就挂一个配置到 /nrllink/conf/udphub.yaml（启动脚本会自动优先加载它）。
+# wget 供 compose 健康检查使用。
 FROM alpine:3.21
-RUN apk add --no-cache ca-certificates tzdata opus opusfile
+RUN apk add --no-cache ca-certificates tzdata opus opusfile wget
 COPY --from=codec2build /codec2/build/src/libcodec2.so* /usr/lib/
-RUN mkdir -p /nrllink/udphub /nrllink/data /nrllink/conf
+RUN mkdir -p /nrllink/udphub /nrllink/data /nrllink/conf /nrllink/www/uploads
 COPY --from=builder /app/udphub /nrllink/udphub/udphub
+COPY docker/udphub.default.yaml /nrllink/udphub/udphub.yaml
 COPY start.sh /nrllink/start.sh
 RUN chmod +x /nrllink/start.sh
 

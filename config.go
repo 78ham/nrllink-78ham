@@ -216,6 +216,9 @@ func (c *config) init() {
 	if v := os.Getenv("NRL_WEBPATH"); v != "" {
 		conf.Web.Path = v
 	}
+	if v := os.Getenv("NRL_TOKEN_KEY"); v != "" {
+		conf.Web.TokenKey = v
+	}
 }
 
 // Exist 判断文件存在

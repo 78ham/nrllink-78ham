@@ -24,6 +24,8 @@ nrllink_test
 
 # Docker
 docker-compose.override.yml
+.env
+.ghcr-token
 
 # Codex / Playwright
 .codex/

@@ -12,3 +12,7 @@ docker-compose*.yml
 doc/
 node_modules/
 www/dist/
+www/node_modules/
+.env
+.env.example
+.ghcr-token
