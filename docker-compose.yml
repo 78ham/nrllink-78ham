@@ -22,7 +22,7 @@ services:
       NRL_WEBPATH: /nrllink/www
       NRL_TOKEN_KEY: ${TOKEN_KEY:-}
     ports:
-      - "${API_BIND:-127.0.0.1}:${API_PORT:-9000}:9000"
+      - "${API_BIND:-0.0.0.0}:${API_PORT:-9000}:9000"
       - "${UDP_PORT:-60050}:60050/udp"
     volumes:
       - nrllink-data:/nrllink/data

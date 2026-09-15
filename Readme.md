@@ -135,10 +135,12 @@ nrllink-78ham/
 镜像**只含后端服务**，自带一份中性的默认配置，开箱即可提供接口、WebSocket 与设备接入。
 
 > **前端说明**：本仓库的 `www/` 是开发用的测试前端，**不随镜像分发**。
-> 生产前端请用 [nrllink-web-78ham](https://github.com/78ham/nrllink-web-78ham) 仓库的编排，
-> 它会把完整前端产物挂到 `/nrllink/www`，页面 / 接口 / WebSocket 同源，无需 nginx 转发。
+> 生产前端请用 [nrllink-web-78ham](https://github.com/78ham/nrllink-web-78ham) 仓库的编排：
+> 那里是**前端容器 + 后端容器**的完整拓扑（同一编排、同一 Docker 网络组），
+> 前端容器（nginx）对公网提供页面，并把 `/api`、`/ws`、`/uploads` 转发到本容器，
+> 前后端在容器网络里用服务名 `nrllink` 互访，不经过宿主机端口。
 
-推荐用后端仓库自带的 compose：
+如果只想单独跑后端（调试接口 / 只做设备接入），可以用本仓库自带的 compose：
 
 ```bash
 cp .env.example .env    # 按需改端口 / 镜像地址 / TOKEN_KEY
@@ -156,7 +158,7 @@ curl -fsSL https://raw.githubusercontent.com/78ham/nrllink-78ham/sqlite/install.
 ```bash
 docker run -d \
   --name nrllink-server \
-  -p 127.0.0.1:9000:9000 \
+  -p 0.0.0.0:9000:9000 \
   -p 60050:60050/udp \
   -e NRL_DBFILE=/nrllink/data/udphub.sqlite3 \
   -e NRL_WEBPATH=/nrllink/www \
@@ -166,7 +168,10 @@ docker run -d \
   ghcr.io/78ham/nrllink:latest
 ```
 
-> 9000 提供接口、WebSocket 和上传图片，默认只绑定 `127.0.0.1`，对外 HTTPS / 域名请自行在前方加反向代理指向 `127.0.0.1:9000`；60050/UDP 为设备接入端口，需公网暴露，不能走 HTTP 反向代理。
+> 9000 提供接口、WebSocket 和上传图片；60050/UDP 为设备接入端口，需公网暴露，不能走 HTTP 反向代理。
+>
+> ⚠️ 上面把 9000 绑到 `0.0.0.0` 是给**局域网**访问用的，务必在防火墙 / 安全组确认 9000 **不对公网开放**；
+> 只在本机使用可改成 `-p 127.0.0.1:9000:9000`。
 
 首次部署的默认管理员密码会打印在容器日志里：
 
@@ -1862,12 +1867,13 @@ getDB()              # 打开数据库（父目录/文件不存在时自动创�
 
 ```bash
 docker run -d \
-  -p 127.0.0.1:9000:9000 -p 60050:60050/udp \
+  -p 0.0.0.0:9000:9000 -p 60050:60050/udp \
   -e NRL_DBFILE=/nrllink/data/udphub.sqlite3 \
   -e NRL_WEBPATH=/nrllink/www \
   -v nrllink-data:/nrllink/data \
   -v nrllink-uploads:/nrllink/www/uploads \
-  -v "$PWD/udphub.yaml:/nrllink/udphub/udphub.yaml:ro" \
+  # 可选：挂自定义配置（改平台名 / APRS / 微信等）
+  # -v "$PWD/config/udphub.yaml:/nrllink/conf/udphub.yaml:ro" \
   ghcr.io/78ham/nrllink:latest
 ```
 
@@ -1886,9 +1892,10 @@ docker run -d \
 
 ### DBfile 路径建议（重要）
 
-- 建议将 `DBfile` 配置到**持久卷内**，如 `/nrllink/data/udphub.sqlite3`。
-- 仓库默认配置的路径 `/nrllink/udphub.sqlite3` **不在**常见 Docker volume 挂载点（`/nrllink/data`）内，
-  换容器/重建容器会**丢失整个数据库**。请修改 `udphub.yaml` 中的 `dbfile`，或通过 `NRL_DBFILE` 环境变量指定到持久卷。
+- 容器部署时请务必让 `DBfile` 落在持久卷内，如 `/nrllink/data/udphub.sqlite3`。
+- 镜像内置的默认配置里 `DBfile` 是 `/nrllink/udphub.sqlite3`，**不在**持久卷挂载点（`/nrllink/data`）内，
+  换容器/重建容器会**丢失整个数据库**；因此 compose 默认用 `NRL_DBFILE` 覆盖到 `/nrllink/data/udphub.sqlite3`。
+  手工 `docker run` 时也请照做。
 - 建议定期备份该数据库文件。
 
 ### 数据库损坏处理策略（坏库策略）
@@ -1906,14 +1913,20 @@ sqlite3 udphub.sqlite3 "UPDATE users SET must_change_pwd=1, routes='' WHERE rout
 
 ### 端口说明
 
-| 端口 | 协议 | 用途 |
-|------|------|------|
-| 9000 | TCP | Web 管理后台 + 接口 + WebSocket（内部，建议只绑 `127.0.0.1`，对外由你的反向代理转发） |
-| 60050 | UDP | 设备语音/控制/心跳信令（需公网直接放通，不能走 HTTP 反向代理） |
+| 端口 | 协议 | 暴露范围 | 用途 |
+|------|------|----------|------|
+| 9000 | TCP | 本机 / 局域网 | 接口 + WebSocket + 上传图片（**不要暴露到公网**） |
+| 60050 | UDP | 公网 | 设备语音/控制/心跳信令（必须直接放通，不能走 HTTP 反向代理） |
 
-### 反向代理配置示例
+> 完整部署（前端容器 + 后端容器）请用 nrllink-web 仓库的编排：前端容器对公网提供页面，
+> 并负责把接口 / WebSocket 转发到本容器，本容器的 9000 只需对局域网或容器网络开放。
 
-服务本身不包含反向代理，对外 HTTPS / 域名由你自备的 Nginx / Caddy / Traefik 处理，全部转发到 `127.0.0.1:9000` 即可。
+### 单独部署后端时的反向代理（可选）
+
+只在「单独跑后端、不用前端容器」时才需要。把 HTTPS 域名全部转发到 `127.0.0.1:9000` 即可。
+
+> 注意：后端自身也会提供 `Web.Path` 下的静态文件，但那只适合临时使用；
+> 正式部署请用 nrllink-web 仓库的前端容器。
 
 Nginx：
 

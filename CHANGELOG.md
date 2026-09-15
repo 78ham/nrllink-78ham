@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed（变更）— 容器部署重构
+- Dockerfile 改为**纯后端镜像**，不再打包 `www/`（`www/` 是开发用测试前端）；
+  runtime 补装 `wget` 以支持 compose 健康检查
+- 镜像内置一份**中性默认配置** `docker/udphub.default.yaml`（平台名为通用值、**APRS 默认关闭**，
+  避免沿用他人呼号上报）；自定义配置挂到 `/nrllink/conf/udphub.yaml` 即可优先加载（`start.sh` 判断）
+- 新增环境变量 `NRL_TOKEN_KEY` 覆盖 JWT 签名密钥（原先只能改配置文件）
+- `docker-compose.yml` 重构：端口/镜像全部走环境变量（`API_BIND`/`API_PORT`/`UDP_PORT`/`NRL_IMAGE`），
+  去掉自定义网络名冲突风险，上传图片独立卷 `nrllink-uploads`
+- `install.sh` 重写：支持服务器一行安装（自动下载编排文件）、自动生成 `.env` 与随机 `TOKEN_KEY`、支持 `--build`
+- 完整部署（前端容器 + 后端容器）以 nrllink-web 仓库为入口；本仓库 compose 用于单独跑后端
+- 文档：Readme 部署章节、端口表、部署架构图 `doc/svg/06-部署架构.mmd` 同步更新
+
+### Fixed（修复）
+- **微信相关接口全部 404**：`http.go` 的 `msghttp()` 里用 `mux.NewRouter()` 注册了 7 条路由
+  却从未挂载到 server 上，等于死代码；改为统一用 `http.HandleFunc` 注册，并移除不再使用的
+  `gorilla/mux` 依赖（`go.mod` / `go.sum` 已 tidy）
+- **首页 CMS 接口前后端路径不一致**：前端调用 `/api/homepage/*`、`/api/admin/homepage/*`，
+  后端只注册了 `/homepage/*`；补齐 `/api` 与 `/api/admin` 两套别名
+
 ### Added（新增）
 - GitHub Actions workflow for automated builds and releases
 - GoReleaser configuration for multi-platform builds

@@ -318,10 +318,11 @@
 <p>NRL 服务器支持三种部署方式，适配不同运维环境：</p>
 <ul>
   <li><strong>Linux 原生</strong>：CentOS / Ubuntu，通过 systemctl 管理 nrllink.service</li>
-  <li><strong>Docker 容器</strong>：<code>docker pull hicaoc/nrllink:latest</code>，端口映射 80（Web）+ 60050/udp（语音），/data /conf 持久化挂载</li>
+  <li><strong>Docker Compose（推荐）</strong>：前端容器 <code>ghcr.io/78ham/nrllink-web</code> 对公网提供页面（TCP 80），后端容器 <code>ghcr.io/78ham/nrllink</code> 提供接口（TCP 9000，本机 / 局域网），两者在同一编排、同一 Docker 网络组内用服务名互访；数据落在 <code>nrllink-data</code> / <code>nrllink-uploads</code> 卷</li>
+  <li><strong>单独跑后端</strong>：<code>docker pull ghcr.io/78ham/nrllink:latest</code>，接口 9000（局域网）+ 60050/udp（公网），可选挂自定义配置到 <code>/nrllink/conf/udphub.yaml</code></li>
   <li><strong>Windows</strong>：直接运行 <code>nrllink_windows_x86_64.exe</code></li>
 </ul>
-<p>Web 管理后台内部监听 TCP 80，通过 nginx 反向代理以 HTTPS 443 对外发布。设备语音/信令使用 UDP 60050。</p>
+<p>前端容器对外监听 TCP 80 提供页面，并把 /api、/ws、/uploads 转发给同一 Docker 网络里的后端容器；后端接口默认对局域网开放（TCP 9000，切勿暴露公网）。设备语音/信令使用 UDP 60050，需公网直通，不能走 HTTP 反向代理。域名与 HTTPS 由部署者在宿主机自备反向代理指向前端容器。</p>
 
 <div class="svg-wrap">
   <object data="svg/06-部署架构.svg" type="image/svg+xml">部署架构</object>
@@ -463,13 +464,14 @@ Content-Type: application/json
   <tr><th>项目</th><th>规格</th></tr>
   <tr><td>传输协议</td><td>UDP（语音/控制），TCP（Web 管理）</td></tr>
   <tr><td>语音编码</td><td>G.711 (a-law )</td></tr>
-  <tr><td>语音端口</td><td>UDP 60050</td></tr>
-  <tr><td>Web 端口（内部）</td><td>TCP 80</td></tr>
-  <tr><td>Web 端口（对外）</td><td>HTTPS 443，经 nginx 反向代理</td></tr>
+  <tr><td>语音端口</td><td>UDP 60050（公网直通）</td></tr>
+  <tr><td>前端端口（对外）</td><td>TCP 80（前端容器，页面入口）</td></tr>
+  <tr><td>后端接口端口</td><td>TCP 9000（本机 / 局域网，不要暴露公网）</td></tr>
+  <tr><td>HTTPS</td><td>可选，由部署者在宿主机自备反向代理指向前端容器</td></tr>
   <tr><td>发言机制</td><td>抢占制（先到先得，语音结束后 200ms 释放）</td></tr>
   <tr><td>混音支持</td><td>会议模式（服务器端多路 PCM 混音）</td></tr>
   <tr><td>数据存储</td><td>SQLite</td></tr>
-  <tr><td>容器支持</td><td>Docker (<code>hicaoc/nrllink:latest</code>)</td></tr>
+  <tr><td>容器支持</td><td>Docker（前端 <code>ghcr.io/78ham/nrllink-web</code> + 后端 <code>ghcr.io/78ham/nrllink</code>）</td></tr>
   <tr><td>系统支持</td><td>Linux、Windows、Docker</td></tr>
   <tr><td>APRS 上报周期</td><td>立即 &rarr; 1 分钟 &rarr; 5 分钟 &rarr; 之后每 10 分钟</td></tr>
   <tr><td>APRS 服务发现</td><td>每 60 秒查询 aprs.tv，自动更新互联列表</td></tr>

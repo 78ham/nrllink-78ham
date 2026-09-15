@@ -96,12 +96,10 @@ echo ""
 port="$(grep -E '^API_PORT=' .env 2>/dev/null | tail -n1 | cut -d= -f2)"
 [ -n "$port" ] || port=9000
 bind="$(grep -E '^API_BIND=' .env 2>/dev/null | tail -n1 | cut -d= -f2)"
-[ -n "$bind" ] || bind=127.0.0.1
+[ -n "$bind" ] || bind=0.0.0.0
 
 info "完成！后端接口 http://${bind}:${port}"
 info "首次部署的管理员密码： $DC logs nrllink | grep -A3 默认管理员"
 warn "请确认防火墙已放通 UDP 60050（设备接入）"
-if [ "$bind" = "127.0.0.1" ]; then
-  info "接口当前只监听本机；要让局域网访问，把 .env 里 API_BIND 改成 0.0.0.0 或内网网卡地址"
-fi
+warn "请确认防火墙没有把后端接口 TCP ${port} 暴露到公网"
 warn "此仓库只跑后端；完整部署（前端容器 + 后端容器）请用 nrllink-web 仓库"
