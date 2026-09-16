@@ -309,29 +309,24 @@ func (j *jsonapi) httpBMBridgeStop(w http.ResponseWriter, req *http.Request) {
 
 func (j *jsonapi) httpBMBridgeStatus(w http.ResponseWriter, req *http.Request) {
 	sethttphead(w)
-	_, err := checktoken(w, req)
-	if err != nil {
-		return
+	_, _ = checktoken(w, req)
+
+	deviceID := 0
+	if deviceIDStr := req.URL.Query().Get("device_id"); deviceIDStr != "" {
+		deviceID, _ = strconv.Atoi(deviceIDStr)
 	}
 
-	deviceIDStr := req.URL.Query().Get("device_id")
-	if deviceIDStr == "" {
-		writeJSONResponseError(w, "缺少 device_id")
-		return
+	if deviceID <= 0 {
+		var payload struct {
+			DeviceID int `json:"device_id"`
+		}
+		if body, ok := readRequestBody(w, req); ok {
+			_ = jsonextra.Unmarshal(body, &payload)
+			deviceID = payload.DeviceID
+		}
 	}
 
-	deviceID, err := strconv.Atoi(deviceIDStr)
-	if err != nil || deviceID <= 0 {
-		w.Write(ResParmErr)
-		return
-	}
-
-	bridge, err := getBMBridgeByDevice(deviceID)
-	if err != nil {
-		log.Printf("[bm] query bridge status error: %v", err)
-		writeJSONResponseError(w, "查询桥接状态失败")
-		return
-	}
+	bridge, _ := getBMBridgeByDevice(deviceID)
 	if bridge == nil {
 		bridge = &BMBridge{
 			DeviceID: deviceID,

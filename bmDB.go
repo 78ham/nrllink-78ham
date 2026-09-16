@@ -75,6 +75,13 @@ func initBMNetworkTables() {
 			log.Printf("[bm] DDL error: %v\n  SQL: %s", err, stmt)
 		}
 	}
+
+	var count int
+	if err := db.QueryRow("SELECT count(*) FROM bm_networks").Scan(&count); err == nil && count == 0 {
+		_, _ = db.Exec(`INSERT INTO bm_networks 
+			(name, server_address, server_port, password, callsign, dmrid, default_tg, timeslot, heartbeat_interval, status, note)
+			VALUES ('BrandMeister 4601 (Master)', 'bm.4601.master', 62031, 'pass123456', 'NOCALL', 4600000, 46001, 2, 10, 1, '默认 BrandMeister 4601 节点')`)
+	}
 }
 
 func getBMNetworkList() ([]BMNetwork, error) {
