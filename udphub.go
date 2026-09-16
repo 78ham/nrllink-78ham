@@ -529,13 +529,13 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 		dev.LastCtlEndTime = nrl.timeStamp
 
 		//来自其他服务器255的包
-		if nrl.DevModel == 255 && nrl.SSID == 255 {
+		if nrl.DevModel == 255 || nrl.SSID == 255 {
 			dev.ISOnline = true
 			forwardServerVoice(nrl, dev, packet, conn, gp)
 			return
 		}
 
-		if nrl.DevModel == 200 && nrl.SSID == 200 {
+		if nrl.DevModel == 200 || nrl.SSID == 200 {
 			forwardServerVoice(nrl, dev, packet, conn, gp)
 			return
 		}
@@ -673,6 +673,9 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 				log.Println("change group err:", err)
 				conn.WriteToUDP(append(packet, (strconv.Itoa(groupid)+",error")...), nrl.UDPAddr)
 			} else {
+				if err := updateDeviceGroupID(dev); err != nil {
+					log.Println("save device group err:", err)
+				}
 				conn.WriteToUDP(append(packet, str...), nrl.UDPAddr)
 			}
 
@@ -776,7 +779,7 @@ func FullNetOutput(nrl *NRL21packet, dev *deviceInfo, packet []byte) {
 // 原重复的 case 12（COM 透传）已删除，本函数当前无调用点，保留仅供回溯。
 func forwardCOM(nrl *NRL21packet, packet []byte, gp *group) {
 
-	if gp.ID > 3 {
+	if gp.ID > 3 || gp.ID == 0 {
 		return
 	}
 
@@ -809,8 +812,8 @@ func forwardVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, gp *group) {
 
 	numbs := gp.connPool.count()
 
-	//房间类型为中继互联的时候，使用不允许出现双工
-	if gp.Type == 1 || gp.ID == 999 {
+	// 房间类型为中继互联(1)、数模互联(4)或全网通(999)的时候，不允许出现双工
+	if gp.Type == 1 || gp.Type == 4 || gp.ID == 999 {
 		numbs = 3
 	}
 

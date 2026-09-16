@@ -829,6 +829,24 @@ func offlineDevice(dev string) {
 	}
 }
 
+// getOnlineDeviceByID 按设备ID在内存设备表中查找设备，
+// 用于请求参数缺少 callsign/ssid 时定位内存中的设备记录。
+func getOnlineDeviceByID(id int) *deviceInfo {
+	onlineDevMapMu.RLock()
+	defer onlineDevMapMu.RUnlock()
+	if d, ok := onlinedevMap[id]; ok {
+		return d
+	}
+	devMapMu.RLock()
+	defer devMapMu.RUnlock()
+	for _, d := range devCallsignSSIDMap {
+		if d.ID == id {
+			return d
+		}
+	}
+	return nil
+}
+
 func delDevice(dev *deviceInfo) error {
 
 	//	fmt.Println("user:", e)
@@ -841,12 +859,30 @@ func delDevice(dev *deviceInfo) error {
 		return err
 	}
 
-	if d, ok := devMapLoad(dev.CallSignSSID); ok {
-		devMapDelete(dev.CallSignSSID)
-		if g, ok := publicGroupLoad(dev.GroupID); ok {
-			g.devDelete(dev.ID)
+	// 内存中的设备以实际记录为准，请求参数可能缺少 callsignssid
+	d := getOnlineDeviceByID(dev.ID)
+	if d == nil {
+		if dd, ok := devMapLoad(dev.CallSignSSID); ok {
+			d = dd
+		}
+	}
+
+	if d != nil {
+		devMapDelete(d.CallSignSSID)
+
+		if g, ok := publicGroupLoad(d.GroupID); ok {
+			g.devDelete(d.ID)
 			if d.udpAddr != nil {
 				g.connPool.removeDevice(d.udpAddr.String())
+			}
+		} else if d.GroupID <= 3 && d.GroupID > 0 {
+			if user, ok := userlist.Load(d.CallSign); ok {
+				if oldGroup, exists := user.(*userinfo).Groups[d.GroupID]; exists {
+					oldGroup.devDelete(d.ID)
+					if d.udpAddr != nil {
+						oldGroup.connPool.removeDevice(d.udpAddr.String())
+					}
+				}
 			}
 		}
 	}
@@ -857,6 +893,24 @@ func delDevice(dev *deviceInfo) error {
 
 func updateDevice(e *deviceInfo) error {
 
+	d, ok := devMapLoad(getCallsignSSID(e.CallSign, e.SSID))
+
+	// 先切内存中的组，校验失败时不落库，避免库和内存不一致
+	if ok && d.GroupID != e.GroupID {
+
+		if d.DevModel == 255 {
+			return errors.New("device model 255 cannot leave group 999")
+		}
+
+		if d.DevModel == 200 && e.GroupID == 999 {
+			return errors.New("device model 200 cannot join group 999")
+		}
+
+		if _, err := changeDevGroup(d, e.GroupID); err != nil {
+			return err
+		}
+	}
+
 	_, err := db.Exec(`update devices set name=?, gird=?, dmrid=?, dev_type=?, dev_model=?, 	group_id=?,status=?,priority=?,
 	chan_name=?,rf_type=?,note=?,password=?,update_time=CURRENT_TIMESTAMP  where id=?`,
 		e.Name, e.Gird, e.DMRID, e.DevType, e.DevModel, e.GroupID, e.Status, e.Priority, e.ChanName, e.RFType, e.Note, e.Password, e.ID)
@@ -865,7 +919,7 @@ func updateDevice(e *deviceInfo) error {
 		return err
 	}
 
-	if d, ok := devMapLoad(getCallsignSSID(e.CallSign, e.SSID)); ok {
+	if ok {
 		d.Name = e.Name
 		d.Gird = e.Gird
 		d.DMRID = e.DMRID
@@ -877,28 +931,20 @@ func updateDevice(e *deviceInfo) error {
 		d.Password = e.Password
 		d.RFType = e.RFType
 		d.ChanName = e.ChanName
-
-		if d.GroupID != e.GroupID {
-
-			if d.DevModel == 255 {
-				d.GroupID = 999
-				return errors.New("device model 255 cannot leave group 999")
-			}
-
-			if d.DevModel == 200 && e.GroupID == 999 {
-				return errors.New("device model 200 cannot join group 999")
-			}
-
-			_, err := changeDevGroup(d, e.GroupID)
-			if err != nil {
-				return err
-			}
-		}
-
 	}
 
 	return nil
 
+}
+
+// 将设备当前所属群组持久化到数据库，供不经过 updateDevice 的切组路径使用
+func updateDeviceGroupID(dev *deviceInfo) error {
+	_, err := db.Exec(`update devices set group_id=?, update_time=CURRENT_TIMESTAMP where id=?`, dev.GroupID, dev.ID)
+	if err != nil {
+		log.Println("update device group failed, ", err)
+		return err
+	}
+	return nil
 }
 
 func changeDeviceGroup(e *deviceInfo) error {
@@ -910,7 +956,9 @@ func changeDeviceGroup(e *deviceInfo) error {
 			if err != nil {
 				return err
 			}
-
+			if err := updateDeviceGroupID(d); err != nil {
+				return err
+			}
 		}
 
 	}
