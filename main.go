@@ -48,6 +48,7 @@ func main() {
 	initRegistersTable()
 	initSiteSettingTable()
 	initHomepageTables()
+	initBMNetworkSchema()
 
 	ensureBootstrap()
 

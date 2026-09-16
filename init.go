@@ -682,3 +682,9 @@ func clearMustChangePwd(userID int) {
 		log.Printf("[bootstrap] clear must_change_pwd flag for user %d error: %v", userID, err)
 	}
 }
+
+// initBMNetworkSchema 负责初始化 NRL-BM (模型 202) 专属网络配置与桥接状态表结构
+func initBMNetworkSchema() {
+	initBMNetworkTables()
+}
+

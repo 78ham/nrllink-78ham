@@ -340,6 +340,22 @@ func (j *jsonapi) msghttp() {
 
 	registerRoute("/operatorlog/list", j.httpOperatorLogList)
 
+	// BM 网络管理与桥接后台化接口
+	registerRoute("/bm/network/list", j.httpBMNetworkList)
+	registerRoute("/bm/network/create", j.httpBMNetworkCreate)
+	registerRoute("/bm/network/update", j.httpBMNetworkUpdate)
+	registerRoute("/bm/network/delete", j.httpBMNetworkDelete)
+	registerRoute("/bm/bridge/start", j.httpBMBridgeStart)
+	registerRoute("/bm/bridge/stop", j.httpBMBridgeStop)
+	registerRoute("/bm/bridge/status", j.httpBMBridgeStatus)
+	registerRoute("/api/bm/network/list", j.httpBMNetworkList)
+	registerRoute("/api/bm/network/create", j.httpBMNetworkCreate)
+	registerRoute("/api/bm/network/update", j.httpBMNetworkUpdate)
+	registerRoute("/api/bm/network/delete", j.httpBMNetworkDelete)
+	registerRoute("/api/bm/start", j.httpBMBridgeStart)
+	registerRoute("/api/bm/stop", j.httpBMBridgeStop)
+	registerRoute("/api/bm/status", j.httpBMBridgeStatus)
+
 	// /api/v1/* 别名层（兼容新版前端）
 	api := func(pattern string, handler func(http.ResponseWriter, *http.Request)) {
 		http.HandleFunc("/api/v1"+pattern, handler)
