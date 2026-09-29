@@ -1,14 +1,13 @@
 package main
 
 import (
-	_ "database/sql"
+	"database/sql"
 	"fmt"
 	"log"
 	"strconv"
 	"time"
 
 	"github.com/lib/pq"
-	//_ "github.com/lib/pq"
 )
 
 type wxUserInfo struct {
@@ -74,19 +73,28 @@ func (user *wxUserInfo) String() string {
 		user.SubscribeScene, user.QRscene, user.QRsceneStr)
 }
 
+// wxuserMinimalCols 是 wxuser 表的最小可查列集（与 addwxuser 的 INSERT 列一致），
+// 用于把此前 Exec(SELECT) 丢弃结果的查询改为真正回填结构体
+const wxuserMinimalCols = `subscribe,openid,name,nickname,sex,language,city,province,country,
+	headimgurl,subscribe_time,unionid,remark,groupid,phone`
+
+func scanWxUserMinimal(row *sql.Row, r *wxUserInfo) error {
+	return row.Scan(&r.Subscribe, &r.OpenID, &r.Name, &r.NickName, &r.Sex, &r.Language,
+		&r.City, &r.Province, &r.Country, &r.Headimgurl, &r.SubscribeTime, &r.Unionid,
+		&r.Remark, &r.Groupid, &r.Phone)
+}
+
 func checkUser(openid string) bool {
 
 	var total int
 
-	_, err := db.Exec(`SELECT count(*) as total from wxuser where openid=?  `, openid)
+	err := db.QueryRow(`SELECT count(*) as total from wxuser where openid=?  `, openid).Scan(&total)
 	if err != nil {
 		log.Println("query user isexites err:", err, total, openid)
-	}
-
-	if total == 0 {
 		return false
 	}
-	return true
+
+	return total > 0
 }
 
 func BindWeiXin(pc *phonecode) (*wxUserInfo, error) {
@@ -99,13 +107,11 @@ func BindWeiXin(pc *phonecode) (*wxUserInfo, error) {
 
 	r := &wxUserInfo{}
 
-	_, err = db.Exec(`SELECT * from wxuser where openid=?  `, openid)
-	if err != nil {
-		//log.Println("query openid err:", master.SchName, pc.Schname)
+	// 确认绑定记录存在（此前用 Exec 执行 SELECT，结果被丢弃）
+	var exists string
+	if err := db.QueryRow(`SELECT openid from wxuser where openid=?  `, openid).Scan(&exists); err != nil {
 		return nil, err
 	}
-
-	//sch := pc.Phone + "," + pc.Name + "," + pc.ID + "," + pc.Schname + "," + pc.SchoolName + "," + pc.ServerURL
 
 	_, err = db.Exec(`UPDATE wxuser set phone=?,
 	name=? 
@@ -116,9 +122,12 @@ func BindWeiXin(pc *phonecode) (*wxUserInfo, error) {
 		return nil, err
 	}
 
-	sql2 := `UPDATE public.client set phone=?,name=? ,unionid=?,update_time=now() where openid=?`
+	_, _ = db.Exec(`UPDATE client set phone=?,name=? ,update_time=CURRENT_TIMESTAMP where openid=?`, pc.Phone, pc.Name, openid)
 
-	_, _ = db.Exec(sql2, pc.Phone, pc.Name, openid)
+	// 回填绑定结果，调用方依赖 user.OpenID 判断成功
+	if err := scanWxUserMinimal(db.QueryRow(`SELECT `+wxuserMinimalCols+` from wxuser where openid=?`, openid), r); err != nil {
+		return nil, err
+	}
 
 	return r, nil
 
@@ -143,8 +152,7 @@ func getUserInfoByOpenid(openid string) (*wxUserInfo, error) {
 
 	r := &wxUserInfo{}
 
-	_, err := db.Exec(`SELECT * from wxuser where openid=?  `, openid)
-	if err != nil {
+	if err := scanWxUserMinimal(db.QueryRow(`SELECT `+wxuserMinimalCols+` from wxuser where openid=?  `, openid), r); err != nil {
 		log.Println("query userinfo by  openid err:", err, openid)
 		return r, err
 	}
@@ -169,7 +177,9 @@ func getUserInfoByOpenidForBind(openid string) (*wxUserInfo, error) {
 
 	c := &wxclient{}
 
-	_, err := db.Exec(`SELECT * from public.client where openid=?  `, openid)
+	// client 表为 PG 时期遗留，SQLite 下不存在时走 err 分支（与原行为一致）
+	err := db.QueryRow(`SELECT id,phone,name,schname,master_schname,mpopenid,openid,unionid,create_time from client where openid=?  `,
+		openid).Scan(&c.ID, &c.Phone, &c.Name, &c.Schname, &c.MasterSchname, &c.MPopenID, &c.OpenID, &c.UnionID, &c.CreateTime)
 	if err != nil {
 		log.Println("query client by  unionid err:", err)
 		return nil, err
@@ -177,8 +187,7 @@ func getUserInfoByOpenidForBind(openid string) (*wxUserInfo, error) {
 
 	r := &wxUserInfo{}
 
-	_, err = db.Exec(`SELECT * from  wxuser where unionid=?  `, c.UnionID)
-	if err != nil {
+	if err := scanWxUserMinimal(db.QueryRow(`SELECT `+wxuserMinimalCols+` from wxuser where unionid=?  `, c.UnionID), r); err != nil {
 		log.Println("query userinfo by  unionid err:", err)
 		return r, err
 	}
@@ -191,9 +200,9 @@ func getUserInfoByUnionid(unionid string) (*wxUserInfo, error) {
 
 	c := &wxclient{}
 
-	query := `SELECT id,name,master_schname,unionid,mpopenid,openid,schname,phone from public.client where unionid=? `
+	query := `SELECT id,phone,name,schname,master_schname,mpopenid,openid,unionid,create_time from client where unionid=? `
 
-	_, err := db.Exec(query, unionid)
+	err := db.QueryRow(query, unionid).Scan(&c.ID, &c.Phone, &c.Name, &c.Schname, &c.MasterSchname, &c.MPopenID, &c.OpenID, &c.UnionID, &c.CreateTime)
 	if err != nil {
 		log.Println("query client by  unionid err:", err, "\n", query)
 		return nil, err
@@ -201,8 +210,7 @@ func getUserInfoByUnionid(unionid string) (*wxUserInfo, error) {
 
 	r := &wxUserInfo{}
 
-	_, err = db.Exec(`SELECT * from  wxuser where unionid=?  `, c.UnionID)
-	if err != nil {
+	if err := scanWxUserMinimal(db.QueryRow(`SELECT `+wxuserMinimalCols+` from wxuser where unionid=?  `, c.UnionID), r); err != nil {
 		log.Println("query userinfo by  unionid err:", err)
 		return r, err
 	}
@@ -215,9 +223,9 @@ func getMPUserInfoByOpenID(openid string) (*wxUserInfo, error) {
 
 	c := &wxclient{}
 
-	query := `SELECT id,name,master_schname,unionid,mpopenid,openid,schname,phone from public.client where mpopenid=? `
+	query := `SELECT id,phone,name,schname,master_schname,mpopenid,openid,unionid,create_time from client where mpopenid=? `
 
-	_, err := db.Exec(query, openid)
+	err := db.QueryRow(query, openid).Scan(&c.ID, &c.Phone, &c.Name, &c.Schname, &c.MasterSchname, &c.MPopenID, &c.OpenID, &c.UnionID, &c.CreateTime)
 	if err != nil {
 		log.Println("query client by  unionid err:", err)
 		return nil, err
@@ -225,8 +233,7 @@ func getMPUserInfoByOpenID(openid string) (*wxUserInfo, error) {
 
 	r := &wxUserInfo{}
 
-	_, err = db.Exec(`SELECT * from wxuser where mpopenid=?  `, c.MPopenID)
-	if err != nil {
+	if err := scanWxUserMinimal(db.QueryRow(`SELECT `+wxuserMinimalCols+` from wxuser where mpopenid=?  `, c.MPopenID), r); err != nil {
 		log.Println("query mp userinfo by  openid err:", err)
 		return r, err
 	}
@@ -270,10 +277,10 @@ func addwxuser(user *wxUserInfo) error {
 		return err
 	}
 
-	sql2 := `INSERT into public.client (master_schname,openid,unionid,create_time,update_time) 
-	values(?,?,?,now(),now())`
+	sql2 := `INSERT into client (master_schname,openid,unionid,create_time,update_time)
+	values(?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`
 
-	_, err = db.Exec(sql2, user.OpenID, user.Unionid)
+	_, err = db.Exec(sql2, user.OpenID, user.Unionid, user.OpenID)
 	if err != nil {
 		log.Println("绑定失败：", err, sql2)
 		return err
@@ -310,7 +317,7 @@ func HAMMPuserLogin(resp *wxjscode) (*wxUserInfo, error) {
 
 	}
 
-	_, err = db.Exec(`UPDATE  wxuser set last_login_time=now(),session_key=? where mpopenid =?`, resp.SessionKey, resp.OpenID)
+	_, err = db.Exec(`UPDATE  wxuser set last_login_time=CURRENT_TIMESTAMP,session_key=? where mpopenid =?`, resp.SessionKey, resp.OpenID)
 
 	if err != nil {
 		log.Println("update wxuser err", err)

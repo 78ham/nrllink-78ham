@@ -133,6 +133,9 @@ Application: OPUS_APPLICATION_VOIP
 Complexity: 10
 */
 
+// crlfCutset 呼号字段的裁剪字符集（\r \0）；定义为包级常量避免每包重复构造
+var crlfCutset = string([]byte{13, 0})
+
 func (n *NRL21packet) decodeNRL21(d []byte) (err error) {
 
 	if len(d) < 48 {
@@ -151,7 +154,7 @@ func (n *NRL21packet) decodeNRL21(d []byte) (err error) {
 	n.Type = d[20]
 	n.Status = d[21]
 	n.Count = binary.BigEndian.Uint16(d[22:24])
-	n.CallSign = string(bytes.TrimRight(d[24:30], string([]byte{13, 0})))
+	n.CallSign = string(bytes.TrimRight(d[24:30], crlfCutset))
 
 	if !IsCallSign(n.CallSign) {
 		return errors.New("callsign error")
@@ -161,7 +164,7 @@ func (n *NRL21packet) decodeNRL21(d []byte) (err error) {
 	n.DevModel = d[31]
 
 	if n.Type == 9 || n.DevModel == 200 || n.DevModel == 255 {
-		n.OriginalCallsign = string(bytes.TrimRight(d[32:38], string([]byte{13, 0})))
+		n.OriginalCallsign = string(bytes.TrimRight(d[32:38], crlfCutset))
 		n.OriginalSSID = d[38]
 		n.OriginalIP = d[39:43]
 		// 200/255 设备沿用旧协议，无单独 CodecType/Caps 字段

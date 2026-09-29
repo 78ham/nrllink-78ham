@@ -80,9 +80,24 @@ type wsCallHub struct {
 	activeCalls       map[string]activeCallEntry
 	recent            []wsCallRecord
 	statsNotify       chan struct{}
+	broadcastCh       chan wsBroadcastMsg
 	lastOnlineDevices int
 	lastRoomsChecksum int
 }
+
+// wsBroadcastMsg 待广播消息；roomState 携带状态快照，recent 仅表示"最近通话有变化"
+type wsBroadcastMsg struct {
+	kind  int
+	state wsRoomState
+}
+
+const (
+	wsBroadcastRoomState = iota
+	wsBroadcastRecentCalls
+)
+
+// wsBroadcastChLen 广播队列长度；满即丢弃（说话人状态下次变化会重新触发），绝不阻塞 UDP 收包路径
+const wsBroadcastChLen = 64
 
 type audioBufferEntry struct {
 	data      []byte
@@ -125,8 +140,29 @@ func newWSCallHub() *wsCallHub {
 		activeCalls:       make(map[string]activeCallEntry),
 		recent:            make([]wsCallRecord, 0, 20),
 		statsNotify:       make(chan struct{}, 1),
+		broadcastCh:       make(chan wsBroadcastMsg, wsBroadcastChLen),
 		lastOnlineDevices: -1,
 		lastRoomsChecksum: -1,
+	}
+}
+
+// queueBroadcast 将广播请求投递到后台 worker；队列满时丢弃，保证 UDP 语音路径永不因 WS 阻塞
+func (h *wsCallHub) queueBroadcast(msg wsBroadcastMsg) {
+	select {
+	case h.broadcastCh <- msg:
+	default:
+	}
+}
+
+// broadcastWorker 消费广播队列，在独立 goroutine 中执行实际的客户端推送
+func (h *wsCallHub) broadcastWorker() {
+	for msg := range h.broadcastCh {
+		switch msg.kind {
+		case wsBroadcastRoomState:
+			h.broadcastRoomState(msg.state)
+		case wsBroadcastRecentCalls:
+			h.broadcastRecentCalls()
+		}
 	}
 }
 
@@ -256,6 +292,8 @@ func (h *wsCallHub) promoteActiveCallLocked(roomKey string, duration time.Durati
 }
 
 func (h *wsCallHub) run() {
+	go h.broadcastWorker()
+
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -603,7 +641,8 @@ func (h *wsCallHub) trackCallStart(gp *group, callsign string, ssid byte, ts tim
 	}
 	h.mu.Unlock()
 
-	h.broadcastRoomState(state)
+	// UDP 语音路径上不做同步广播，交给后台 worker
+	h.queueBroadcast(wsBroadcastMsg{kind: wsBroadcastRoomState, state: state})
 }
 
 func (h *wsCallHub) touchRoomActivity(gp *group, callsign string, ssid byte, ts time.Time, speakers []wsSpeaker) {
@@ -671,10 +710,10 @@ func (h *wsCallHub) touchRoomActivity(gp *group, callsign string, ssid byte, ts 
 	h.mu.Unlock()
 
 	if shouldBroadcast {
-		h.broadcastRoomState(state)
+		h.queueBroadcast(wsBroadcastMsg{kind: wsBroadcastRoomState, state: state})
 	}
 	if recentChanged {
-		h.broadcastRecentCalls()
+		h.queueBroadcast(wsBroadcastMsg{kind: wsBroadcastRecentCalls})
 	}
 }
 
@@ -725,14 +764,20 @@ func (h *wsCallHub) broadcastRoomState(state wsRoomState) {
 	}
 	h.mu.RUnlock()
 
+	// 同一份状态对所有客户端只需序列化一次
+	payload, err := jsonextra.Marshal(wsCallMessage{
+		Type: "room_state",
+		Room: &state,
+	})
+	if err != nil {
+		return
+	}
+
 	for _, client := range clients {
 		if !client.canAccessRoom(state.RoomKey) {
 			continue
 		}
-		if err := client.sendJSON(wsCallMessage{
-			Type: "room_state",
-			Room: &state,
-		}); err != nil {
+		if err := client.sendRaw(payload); err != nil {
 			client.close()
 		}
 	}
@@ -794,20 +839,31 @@ func (c *wsCallClient) snapshotSubscriptions() []string {
 	return keys
 }
 
+// wsCallWriteTimeout 单次写超时；超时视为慢客户端，由调用方关闭
+const wsCallWriteTimeout = 5 * time.Second
+
 func (c *wsCallClient) sendJSON(message wsCallMessage) error {
 	payload, err := jsonextra.Marshal(message)
 	if err != nil {
 		return err
 	}
 
+	return c.sendRaw(payload)
+}
+
+func (c *wsCallClient) sendRaw(payload []byte) error {
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
+
+	c.ws.SetWriteDeadline(time.Now().Add(wsCallWriteTimeout))
 	return websocket.Message.Send(c.ws, string(payload))
 }
 
 func (c *wsCallClient) sendBinary(data []byte) error {
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
+
+	c.ws.SetWriteDeadline(time.Now().Add(wsCallWriteTimeout))
 	return websocket.Message.Send(c.ws, data)
 }
 
@@ -1075,19 +1131,16 @@ func (j *jsonapi) wsCallStream(ws *websocket.Conn) {
 			return
 		}
 
-		user, err = getuser(token.Username)
+		user, err = getUserCached(token.Username)
 		if err != nil || user.Status != 1 {
 			log.Println("websocket user lookup failed:", err)
 			ws.Close()
 			return
 		}
 
-		// getuser 返回的是未初始化的用户副本（usersDB.go 里 userinit 被注释），
-		// 私有房间（个人房间1~3）挂在内存 userlist 的初始化用户上，优先换成它；
-		// 极端情况下（内存里没有）现场初始化，保证登录用户总能看到自己的私有房间
-		if cached, ok := userlist.Load(user.CallSign); ok {
-			user = cached.(*userinfo)
-		} else if user.Groups == nil {
+		// getUserCached 命中缓存时返回的就是 userlist 里的初始化用户；
+		// DB 回源时是未初始化副本，现场初始化，保证登录用户总能看到自己的私有房间
+		if user.Groups == nil {
 			user.userinit()
 		}
 	}

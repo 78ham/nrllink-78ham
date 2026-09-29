@@ -141,6 +141,7 @@ func removeExpiredDeviceFromPool(dev *deviceInfo, gp *group) {
 	}
 	dev.ISOnline = false
 	dev.udpAddr = nil
+	dev.addrStr = ""
 }
 
 func queryBillingPackages(includeDisabled bool) ([]*billingPackage, error) {
@@ -416,7 +417,7 @@ func wechatPayRequest(method, path string, body []byte) (*http.Response, error) 
 		return nil, err
 	}
 	req.Header.Set("Authorization", auth)
-	return http.DefaultClient.Do(req)
+	return apiHTTPClient.Do(req)
 }
 
 func wechatPayAuthorization(method, canonicalURL string, body []byte) (string, error) {

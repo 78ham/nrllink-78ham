@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	// _ "net/http/pprof"
@@ -51,6 +52,14 @@ var (
 	totalStatsMu sync.RWMutex
 )
 
+// 高频计数器用 atomic：UDP 路径每包/每帧累加，避免全局锁与闭包分配。
+// 读取时经由 totalStatsSnapshot 折算回结构体
+var (
+	statsPacketNumber atomic.Int64
+	statsTraffic      atomic.Int64
+	statsVoiceTime    atomic.Int64
+)
+
 type totalStats struct {
 	DevNumber           int `json:"dev_number"`
 	OnlineDevNumber     int `json:"online_dev_number"`
@@ -73,6 +82,9 @@ func totalStatsSnapshot() totalStats {
 	totalStatsMu.RLock()
 	snapshot := totalstats
 	totalStatsMu.RUnlock()
+	snapshot.PacketNumber = int(statsPacketNumber.Load())
+	snapshot.Traffic = int(statsTraffic.Load())
+	snapshot.VoiceTime = int(statsVoiceTime.Load())
 	return snapshot
 }
 
@@ -126,7 +138,7 @@ func (j *jsonapi) httpplatforminfo(w http.ResponseWriter, req *http.Request) {
 
 func (j *jsonapi) httpplatformList(w http.ResponseWriter, req *http.Request) {
 
-	rescode, _ := jsonextra.Marshal(conf.PlatformList)
+	rescode, _ := jsonextra.Marshal(getPlatformList())
 
 	respone := fmt.Sprintf(`{"code":20000,"data":{"items":%s}}`, rescode)
 

@@ -257,6 +257,42 @@ func getuser(username string) (*userinfo, error) {
 	return r, nil
 }
 
+// cacheUserIndexes 维护用户内存双索引：userlist 按 CallSign，userPhoneIndex 按 Phone。
+// 只存经过 userinit 的用户对象（Groups 等字段被其它模块依赖）。
+func cacheUserIndexes(u *userinfo) {
+	if u.CallSign == "" {
+		return
+	}
+	userlist.Store(u.CallSign, u)
+	if u.Phone != "" {
+		userPhoneIndex.Store(u.Phone, u)
+	}
+}
+
+func uncacheUserIndexes(u *userinfo) {
+	if u.CallSign != "" {
+		userlist.Delete(u.CallSign)
+	}
+	if u.Phone != "" {
+		userPhoneIndex.Delete(u.Phone)
+	}
+}
+
+// getUserCached 优先从内存索引取用户（checktoken 每请求调用的热路径），未命中回源 DB。
+// 命中缓存时返回共享指针，调用方按只读使用；DB 回源返回全新副本（不回填索引，
+// 因为 getuser 的结果未做 userinit，直接入 userlist 会缺 Groups 等字段）。
+func getUserCached(username string) (*userinfo, error) {
+	username = strings.ToUpper(username)
+
+	if v, ok := userlist.Load(username); ok {
+		return v.(*userinfo), nil
+	}
+	if v, ok := userPhoneIndex.Load(username); ok {
+		return v.(*userinfo), nil
+	}
+	return getuser(username)
+}
+
 func getuserByID(id int) (*userinfo, error) {
 	r := &userinfo{}
 	var roles string
@@ -286,7 +322,8 @@ func getEmpListByRole(role string) ([]userinfo, int) {
 
 	emp := []userinfo{}
 
-	query := `SELECT id,name,callsign,gird,phone,password,birthday,mdcid,dmrid,
+	// 不查询 password（bcrypt 哈希不应随接口返回）
+	query := `SELECT id,name,callsign,gird,phone,birthday,mdcid,dmrid,
 	sex,avatar,address,roles,introduction,alarm_msg,status,update_time,last_login_time,
 	login_err_times,create_time,openid,nickname,pid,last_login_ip,expire_time FROM users
 	 where  roles like ?  ORDER BY id ASC`
@@ -304,7 +341,7 @@ func getEmpListByRole(role string) ([]userinfo, int) {
 
 		r := userinfo{}
 		var roles string
-		err := rows.Scan(&r.ID, &r.Name, &r.CallSign, &r.Gird, &r.Phone, &r.Password, &r.Birthday, &r.MDCID, &r.DMRID,
+		err := rows.Scan(&r.ID, &r.Name, &r.CallSign, &r.Gird, &r.Phone, &r.Birthday, &r.MDCID, &r.DMRID,
 			&r.Sex, &r.Avatar, &r.Address,
 			&roles, &r.Introduction, &r.AlarmMsg, &r.Status, &r.UpdateTime, &r.LastLoginTime, &r.LoginErrTimes,
 			&r.CreateTime, &r.OpenID, &r.NickName, &r.PID, &r.LastLoginIP, &r.ExpireTime)
@@ -317,9 +354,8 @@ func getEmpListByRole(role string) ([]userinfo, int) {
 	}
 
 	var t int
-	q := fmt.Sprintf(`SELECT count(*) as total FROM users where  roles like '%%%v%%' ' `, role)
-	//fmt.Println(q)
-	row := db.QueryRow(q)
+	q := `SELECT count(*) as total FROM users where  roles like ? `
+	row := db.QueryRow(q, "%"+role+"%")
 	err = row.Scan(&t)
 
 	if err != nil {
@@ -367,11 +403,17 @@ func loginCheck(password string, username string, ip string) ([]string, bool) {
 	row := db.QueryRow("SELECT password ,login_err_times,status,roles FROM users where phone=? or callsign=?", username, username)
 	err := row.Scan(&r.Password, &r.LoginErrTimes, &r.Status, &roles)
 	if err != nil {
-		log.Println("login err:", err, r, password, username)
+		// 不打印 password：登录失败路径不能把明文密码写进日志
+		log.Println("login err:", err, "username:", username)
 		return nil, false
 	}
 
 	r.Roles = strings.Split(roles, ",")
+
+	// 账号已锁定时直接拒绝，避免每次请求都执行 bcrypt（CPU DoS 放大器）
+	if r.LoginErrTimes >= conf.Security.MaxLoginAttempts {
+		return nil, false
+	}
 
 	var passwordOK bool
 
@@ -380,8 +422,8 @@ func loginCheck(password string, username string, ip string) ([]string, bool) {
 		passwordOK = true
 	}
 
-	if r.LoginErrTimes < conf.Security.MaxLoginAttempts && passwordOK {
-		_, err = db.Exec(`update users set last_login_time=CURRENT_TIMESTAMP,last_login_ip=?,login_err_times=1 where phone=? or callsign=?`, ip, username, username)
+	if passwordOK {
+		_, err = db.Exec(`update users set last_login_time=CURRENT_TIMESTAMP,last_login_ip=?,login_err_times=0 where phone=? or callsign=?`, ip, username, username)
 		if err != nil {
 			log.Println("update users last_login_time and last_login_ip  failed, ", err)
 			return nil, false
@@ -479,7 +521,7 @@ func addUser(e *userinfo) error {
 	fmt.Println(id)
 
 	e.userinit()
-	userlist.Store(e.CallSign, e)
+	cacheUserIndexes(e)
 
 	return nil
 
@@ -494,8 +536,10 @@ func deleteUser(e *userinfo) error {
 	}
 
 	// 先从内存缓存取出旧值，再清理非空的 mdcid/dmrid 映射（参照 updateUserProfile 的做法）
+	oldPhone := e.Phone
 	if oldUser, ok := userlist.Load(e.CallSign); ok {
 		old := oldUser.(*userinfo)
+		oldPhone = old.Phone
 		if old.MDCID != "" {
 			mdcidmap.Delete(old.MDCID)
 		}
@@ -505,6 +549,9 @@ func deleteUser(e *userinfo) error {
 	}
 
 	userlist.Delete(e.CallSign)
+	if oldPhone != "" {
+		userPhoneIndex.Delete(oldPhone)
+	}
 
 	return nil
 }
@@ -546,8 +593,14 @@ func updateUser(e *userinfo) error {
 
 	}
 
+	// 手机号可能被修改：先清掉旧索引，再写入新值
+	if oldUser, ok := userlist.Load(e.CallSign); ok {
+		if old := oldUser.(*userinfo); old.Phone != "" && old.Phone != e.Phone {
+			userPhoneIndex.Delete(old.Phone)
+		}
+	}
 	e.userinit()
-	userlist.Store(e.CallSign, e)
+	cacheUserIndexes(e)
 	mdcidmap.Store(e.MDCID, e.CallSign)
 	dmridmap.Store(e.DMRID, e.CallSign)
 
@@ -650,10 +703,13 @@ func updateUserProfile(id int, dmrid string, mdcid string, avatar string, passwo
 		if old.DMRID != "" && old.DMRID != u.DMRID {
 			dmridmap.Delete(old.DMRID)
 		}
+		if old.Phone != "" && old.Phone != u.Phone {
+			userPhoneIndex.Delete(old.Phone)
+		}
 	}
 
 	u.userinit()
-	userlist.Store(u.CallSign, u)
+	cacheUserIndexes(u)
 	if u.MDCID != "" {
 		mdcidmap.Store(u.MDCID, u.CallSign)
 	}

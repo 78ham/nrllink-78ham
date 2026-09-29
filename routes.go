@@ -22,10 +22,11 @@ type routes struct {
 func getRoutes() *routes {
 	r := &routes{}
 
-	query := "SELECT * from routes "
+	// 只取 routes 列；database/sql 不支持把整行 Scan 进结构体
+	query := "SELECT routes from routes "
 
 	row := db.QueryRow(query)
-	err := row.Scan(r)
+	err := row.Scan(&r.Routes)
 	if err != nil {
 		log.Println("query routes err:", err, r)
 	}

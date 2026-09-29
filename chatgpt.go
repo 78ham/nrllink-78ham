@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	openai "github.com/sashabaranov/go-openai"
 )
@@ -14,8 +15,12 @@ var openaiclient *openai.Client
 
 func chat(msglist []openai.ChatCompletionMessage) (string, error) {
 
+	// 外部 LLM 调用必须有 deadline，否则上游挂起会泄漏 goroutine
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	resp, err := openaiclient.CreateChatCompletion(
-		context.Background(),
+		ctx,
 		openai.ChatCompletionRequest{
 			Model:    openai.GPT3Dot5Turbo,
 			Messages: msglist,

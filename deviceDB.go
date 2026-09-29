@@ -40,6 +40,7 @@ type deviceInfo struct {
 	Traffic         int    `json:"traffic"`                  //流量消�?
 
 	udpAddr    *net.UDPAddr
+	addrStr    string // udpAddr.String() 的缓存，转发循环用字符串比较，避免每帧格式化
 	udpSocket  *net.UDPConn
 	CreateTime string         `json:"create_time" db:"create_time"` //加入时间
 	UpdateTime string         `json:"update_time" db:"update_time"` //信息更新时间
@@ -138,6 +139,7 @@ func checkdeviceOnline() {
 					delete(vv.connPool.devConnMap, kkk)
 					vvv.ISOnline = false
 					vvv.udpAddr = nil
+					vvv.addrStr = ""
 					change = true
 					continue
 				}
@@ -179,6 +181,7 @@ func checkdeviceOnline() {
 						delete(vv.connPool.devConnMap, kkk)
 						vvv.ISOnline = false
 						vvv.udpAddr = nil
+					vvv.addrStr = ""
 						continue
 					}
 
@@ -822,6 +825,7 @@ func offlineDevice(dev string) {
 
 		//delete(publicGroupMap[d.GroupID].connPool.devConnMap, d.udpAddr.String())
 		d.udpAddr = nil
+		d.addrStr = ""
 		d.ISOnline = false
 
 	} else {

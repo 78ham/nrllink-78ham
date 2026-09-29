@@ -253,7 +253,7 @@ func (j *jsonapi) httpWXMsg(w http.ResponseWriter, req *http.Request) {
 				return
 			}
 
-		}(wxrequest.FromUserName, wxrequest.Content, conf.WeiXin.WeiXinAccessToken.AccessToken)
+		}(wxrequest.FromUserName, wxrequest.Content, getWeixinToken())
 
 		return
 
@@ -418,9 +418,29 @@ type WXBody struct {
 
 // func GetAccessToken() string {
 
-// 	return conf.WeiXin.WeiXinAccessToken.AccessToken
+// 	return getWeixinToken()
 
 // }
+
+// weixinTokenMu 保护 WeiXinAccessToken：cronGetWxToken 定时刷新写入，与请求路径的读取并发
+var weixinTokenMu sync.RWMutex
+
+// setWeixinToken 原子替换微信 access token
+func setWeixinToken(b *WXBody) {
+	weixinTokenMu.Lock()
+	conf.WeiXin.WeiXinAccessToken = b
+	weixinTokenMu.Unlock()
+}
+
+// getWeixinToken 返回当前 access token；未获取到（含空指针）时返回空串
+func getWeixinToken() string {
+	weixinTokenMu.RLock()
+	defer weixinTokenMu.RUnlock()
+	if conf.WeiXin.WeiXinAccessToken == nil {
+		return ""
+	}
+	return conf.WeiXin.WeiXinAccessToken.AccessToken
+}
 
 func getToken() error {
 
@@ -438,7 +458,7 @@ func getToken() error {
 
 	}
 
-	conf.WeiXin.WeiXinAccessToken = wxbody
+	setWeixinToken(wxbody)
 	conf.WeiXin.AesKey = EncodingAESKey2AESKey(conf.WeiXin.EncodingAESKey)
 
 	//log.Println("get weixin token end:", conf.WeiXin.SchName, conf.WeiXin.Name)
@@ -457,7 +477,7 @@ func GetAllWeixinAccessToken() {
 
 func setMenu() error {
 
-	AccessToken := conf.WeiXin.WeiXinAccessToken.AccessToken
+	AccessToken := getWeixinToken()
 
 	if AccessToken == "" {
 		return fmt.Errorf("set weixin menu err:  weiXinAccessToken %v is null ", conf.WeiXin.WeiXinAccessToken)
@@ -490,7 +510,7 @@ func SetAllWeixinMenu() {
 
 func GetWXTemplateAllList() error {
 
-	AccessToken := conf.WeiXin.WeiXinAccessToken.AccessToken
+	AccessToken := getWeixinToken()
 
 	if AccessToken == "" {
 		return fmt.Errorf("get weixin Template list err:   accessToken  is null")
@@ -534,7 +554,7 @@ func GetWeiXinTypeTemplateAllList() {
 
 func getTypeMsgID() error {
 
-	AccessToken := conf.WeiXin.WeiXinAccessToken.AccessToken
+	AccessToken := getWeixinToken()
 
 	if AccessToken == "" {
 		return fmt.Errorf("get weixin getTypeMsgID list err:  accessToken  is null")
@@ -654,7 +674,7 @@ type wxjscode struct {
 
 func getMpsession(code, appid, secret string) (*wxjscode, error) {
 
-	//client := &http.Client{}
+	//client := apiHTTPClient
 	// content, err := jsonextra.Marshal(data)
 	// fmt.Println("token:"+weiXinAccessToken+"\n", string(content))
 
@@ -662,7 +682,7 @@ func getMpsession(code, appid, secret string) (*wxjscode, error) {
 
 	url := strings.Join([]string{`https://api.weixin.qq.com/sns/jscode2session?appid=`, appid, "&secret=", secret, "&js_code=", code, "&grant_type=authorization_code"}, "")
 
-	resp, err := http.Get(url)
+	resp, err := apiHTTPClient.Get(url)
 
 	if err != nil {
 		fmt.Println("get jscode2session error", err)
@@ -689,7 +709,7 @@ func getMpsession(code, appid, secret string) (*wxjscode, error) {
 
 func setWeixinMenu(AccessToken, WeiXinMenu string) error {
 
-	client := &http.Client{}
+	client := apiHTTPClient
 
 	url := strings.Join([]string{`https://api.weixin.qq.com/cgi-bin/menu/create`, "?access_token=", AccessToken}, "")
 	// content, err := jsonextra.Marshal(data)
@@ -740,11 +760,11 @@ func setWeixinMenu(AccessToken, WeiXinMenu string) error {
 
 func getWeixinUserInfo(openid string) (*wxUserInfo, error) {
 
-	client := &http.Client{}
+	client := apiHTTPClient
 	// content, err := jsonextra.Marshal(data)
 	// fmt.Println("token:"+weiXinAccessToken+"\n", string(content))
 	postReq, err := http.NewRequest("POST",
-		strings.Join([]string{`https://api.weixin.qq.com/cgi-bin/user/info`, "?access_token=", conf.WeiXin.WeiXinAccessToken.AccessToken, "&openid=", openid}, ""),
+		strings.Join([]string{`https://api.weixin.qq.com/cgi-bin/user/info`, "?access_token=", getWeixinToken(), "&openid=", openid}, ""),
 		bytes.NewReader([]byte("")))
 	postReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
@@ -793,7 +813,7 @@ func GetWeixinAccessToken(appid string, appsecret string) (*WXBody, error) {
 		"&appid=", appid,
 		"&secret=", appsecret}, "")
 
-	infoBody, err := http.Get(URL)
+	infoBody, err := apiHTTPClient.Get(URL)
 	if err != nil {
 		return nil, err
 	}
@@ -853,7 +873,7 @@ func pushCustomMsg(accessToken, toUser, msg string) error {
 
 	postReq.Header.Set("Content-Type", "application/json; encoding=utf-8")
 
-	client := &http.Client{}
+	client := apiHTTPClient
 	resp, err := client.Do(postReq)
 	if err != nil {
 		return err
@@ -890,22 +910,16 @@ func getwxmsglist(where string, args []interface{}, page string) (items []TextRe
 
 func addwxmsg(e *TextRequestBody) error {
 
-	user, err := getUserInfoByOpenid(e.FromUserName)
+	// user 查询保留用于校验绑定关系；wxmsg 为单库单表，不再按 schname 拆 schema（PG 遗留）
+	_, _ = getUserInfoByOpenid(e.FromUserName)
 
-	// fmt.Println("user:", user, err)
-
-	if err != nil || user.Schname == "" {
-		// 无法找到绑定信息的微信用户，
-		user = &wxUserInfo{}
-	}
-
-	query := fmt.Sprintf(`INSERT INTO %v.wxmsg 
+	query := `INSERT INTO wxmsg
 	(to_user_name,from_user_name,create_time,
 	msg_type,event,event_key,url,pic_url,media_id,thumb_media_id,content,
-	msg_id,location_x,location_y,label,timestamp) 
-	VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())`, user.Schname)
+	msg_id,location_x,location_y,label,timestamp)
+	VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)`
 
-	_, err = db.Exec(query, e.ToUserName, e.FromUserName, e.CreateTime,
+	_, err := db.Exec(query, e.ToUserName, e.FromUserName, e.CreateTime,
 		e.MsgType, e.Event, e.EventKey, e.URL, e.PicURL, e.MediaID, e.ThumbMediaID, e.Content,
 		e.MsgID, e.LocationX, e.LocationY, e.Label)
 
@@ -951,7 +965,7 @@ func SendWeixinMs(accessToken string, data interface{}, userid int) {
 
 // SendWeixinMs  send
 func SendWeixin(accessToken string, data interface{}) (*WXRespone, error) {
-	client := &http.Client{}
+	client := apiHTTPClient
 	content, err := jsonextra.Marshal(data)
 
 	if err != nil {
@@ -1047,7 +1061,7 @@ func (j *jsonapi) httpMPPhoneCode(w http.ResponseWriter, req *http.Request) {
 
 	}
 
-	if conf.WeiXin.WeiXinAccessToken.AccessToken == "" {
+	if getWeixinToken() == "" {
 		log.Println("没有微信访问令牌：", err, user.Schname)
 		writeJSONResponse(w, &Response{20001, "微信绑定失败，公众号未配置", nil})
 		return
@@ -1109,7 +1123,7 @@ func (j *jsonapi) httpPhoneCode(w http.ResponseWriter, req *http.Request) {
 		writeJSONResponse(w, &Response{20001, "绑定微信失败", nil})
 		return
 	}
-	if conf.WeiXin.WeiXinAccessToken.AccessToken == "" {
+	if getWeixinToken() == "" {
 		log.Println("发送绑定成功消息错误, 没有微信访问令牌：", err)
 		writeJSONResponse(w, &Response{20001, "微信绑定失败，公众号未配置", nil})
 		return
@@ -1176,16 +1190,16 @@ func (j *jsonapi) httpGetWeiXinMsgContent(w http.ResponseWriter, req *http.Reque
 	//fmt.Println(u.ID, u.Name, u.Phone, u.SchName, sch)
 
 	if mediaType == "video" {
-		URL = strings.Join([]string{`http://api.weixin.qq.com/cgi-bin/media/get?`, "access_token=", conf.WeiXin.WeiXinAccessToken.AccessToken, "&media_id=", mediaID}, "")
+		URL = strings.Join([]string{`http://api.weixin.qq.com/cgi-bin/media/get?`, "access_token=", getWeixinToken(), "&media_id=", mediaID}, "")
 	} else {
 
 		// https://api.weixin.qq.com/cgi-bin/media/get?access_token=ACCESS_TOKEN&media_id=MEDIA_ID
-		URL = strings.Join([]string{`https://api.weixin.qq.com/cgi-bin/media/get?`, "access_token=", conf.WeiXin.WeiXinAccessToken.AccessToken, "&media_id=", mediaID}, "")
+		URL = strings.Join([]string{`https://api.weixin.qq.com/cgi-bin/media/get?`, "access_token=", getWeixinToken(), "&media_id=", mediaID}, "")
 	}
 
 	//fmt.Println(URL)
 
-	res, err := http.Get(URL)
+	res, err := apiHTTPClient.Get(URL)
 	if err != nil {
 		log.Println("get weixin msg content err:", err)
 
@@ -1215,7 +1229,7 @@ func StudentMPuserLogin(resp *wxjscode) (*wxUserInfo, error) {
 
 	}
 
-	_, err = db.Exec(`UPDATE  wxuser set last_login_time=now(),session_key=? where mpopenid = ?`, resp.SessionKey, resp.OpenID)
+	_, err = db.Exec(`UPDATE  wxuser set last_login_time=CURRENT_TIMESTAMP,session_key=? where mpopenid = ?`, resp.SessionKey, resp.OpenID)
 
 	if err != nil {
 		log.Println("update wxuser err", err)

@@ -62,6 +62,7 @@ func (p *Server) Start() error {
 
 		dev.udpSocket = globelconn
 		dev.udpAddr = addr
+		dev.addrStr = addr.String()
 
 		//dev.ISOnline = true
 		dev.DevModel = 200
@@ -114,6 +115,7 @@ func (p *Server) Start() error {
 
 		dev.udpSocket = globelconn
 		dev.udpAddr = addr
+		dev.addrStr = addr.String()
 		dev.DevModel = 200
 		//dev.ISOnline = true
 

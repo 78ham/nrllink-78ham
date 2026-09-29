@@ -35,12 +35,13 @@ func transcodeVoice(data []byte, srcCodecType, dstCodecType byte) ([]byte, error
 	}
 	tcache.mu.Unlock()
 
-	srcCodec, err := NewCodec(srcCodecType)
+	// Opus/Codec2 是重量级 C 资源，必须走池化实例；NewCodec 每帧新建且无法被 GC 回收
+	srcCodec, err := GetPooledCodec(srcCodecType)
 	if err != nil {
 		return nil, fmt.Errorf("transcode: source codec: %w", err)
 	}
 
-	dstCodec, err := NewCodec(dstCodecType)
+	dstCodec, err := GetPooledCodec(dstCodecType)
 	if err != nil {
 		return nil, fmt.Errorf("transcode: dest codec: %w", err)
 	}
@@ -89,9 +90,12 @@ func transcodePacket(packet []byte, srcCodecType, dstCodecType byte, targetDev *
 	return newPacket, nil
 }
 
-// clearTranscodeCache 清理转码缓存（每帧结束后调用）
+// clearTranscodeCache 清理转码缓存（每帧结束后调用）。
+// 上一帧没有转码发生时无需重建 map，避免每帧白抢锁+分配
 func clearTranscodeCache() {
 	tcache.mu.Lock()
-	tcache.cached = make(map[transcodeKey][]byte)
+	if len(tcache.cached) > 0 {
+		tcache.cached = make(map[transcodeKey][]byte)
+	}
 	tcache.mu.Unlock()
 }

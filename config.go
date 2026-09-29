@@ -8,12 +8,32 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 
 	_ "github.com/mattn/go-sqlite3"
 	yaml "gopkg.in/yaml.v3"
 )
 
 var PlatformList []Platformitem
+
+// platformListMu 保护 PlatformList / conf.PlatformList：
+// serverList/aprsget 定时刷新整体替换，与 HTTP 接口、UDP 转发路径的读取并发
+var platformListMu sync.RWMutex
+
+// setPlatformList 原子替换全局平台列表（同时维护模块级 PlatformList 与 conf.PlatformList）
+func setPlatformList(list []Platformitem) {
+	platformListMu.Lock()
+	PlatformList = list
+	conf.PlatformList = list
+	platformListMu.Unlock()
+}
+
+// getPlatformList 返回当前平台列表快照；调用方不得修改返回的 slice
+func getPlatformList() []Platformitem {
+	platformListMu.RLock()
+	defer platformListMu.RUnlock()
+	return conf.PlatformList
+}
 
 type Platformitem struct {
 	Name    string `yaml:"Name" json:"name"` // 对应 YAML 和 JSON 的 name 字段
@@ -246,7 +266,8 @@ func getDB() *sql.DB {
 
 	var err error
 
-	db, err = sql.Open("sqlite3", "file:"+conf.System.DBfile+"?_busy_timeout=5000")
+	// WAL：读写不再互斥；synchronous=NORMAL：WAL 下安全且避免每次 commit fsync
+	db, err = sql.Open("sqlite3", "file:"+conf.System.DBfile+"?_busy_timeout=5000&_journal_mode=WAL&_synchronous=NORMAL")
 
 	if err != nil {
 		log.Fatal(err)
@@ -257,12 +278,13 @@ func getDB() *sql.DB {
 	}
 
 	var integrity string
-	if err = db.QueryRow("PRAGMA integrity_check").Scan(&integrity); err != nil || integrity != "ok" {
+	if err = db.QueryRow("PRAGMA quick_check").Scan(&integrity); err != nil || integrity != "ok" {
 		log.Fatalf("数据库文件损坏: %v，请人工介入，程序不会自动删除或重建数据库", integrity)
 	}
 
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	// WAL 下读连接可并行；写并发由 _busy_timeout 兜底
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 
 	return db
 }

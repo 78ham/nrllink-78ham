@@ -19,7 +19,8 @@ func saveLog() {
 		select {
 		case logEntry, ok := <-logbuffer:
 			if !ok {
-				log.Println("日志缓存被关闭:", err)
+				log.Println("日志缓存被关闭，写日志协程退出")
+				return
 			}
 			if conf.System.CallLogPath != "" && file != nil {
 				if _, err := file.WriteString(logEntry.String() + "\n"); err != nil {

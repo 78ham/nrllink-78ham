@@ -61,7 +61,7 @@ func initAllUserList() {
 
 		user.userinit()
 
-		userlist.Store(user.CallSign, user)
+		cacheUserIndexes(user)
 		mdcidmap.Store(user.MDCID, user.CallSign)
 		dmridmap.Store(user.DMRID, user.CallSign)
 

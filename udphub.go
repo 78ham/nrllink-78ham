@@ -31,6 +31,8 @@ import (
 
 var userlist sync.Map // callid ,userinfo
 
+var userPhoneIndex sync.Map // key phone, value *userinfo —— 供 checktoken 免查库（登录名可能是手机号）
+
 var mdcidmap sync.Map //key mdcid, value callsign
 
 var dmridmap sync.Map //key dmrid, value callsign
@@ -175,7 +177,7 @@ func snapshotQTHMapNew() map[string]qth {
 
 type currentConnPool struct {
 	mu                  sync.RWMutex
-	UDPAddr             *net.UDPAddr
+	addrStr             string    // 当前语音/控制占用者的 "ip:port"（缓存字符串，转发循环零分配比较）
 	lastVoiceTime       time.Time // 上次任意被接受的语音包时间（兼容旧逻辑使用）
 	lastOwnerPacketTime time.Time // 当前占用者本人最近一个被接受的包时间（用于抢话判定）
 	lastCtlTime         time.Time
@@ -233,40 +235,40 @@ func (p *currentConnPool) getDevice(addr string) (*deviceInfo, bool) {
 	return dev, ok
 }
 
-func (p *currentConnPool) voiceState() (*net.UDPAddr, time.Time, int) {
+func (p *currentConnPool) voiceState() (string, time.Time, int) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.UDPAddr, p.lastVoiceTime, p.lastPriority
+	return p.addrStr, p.lastVoiceTime, p.lastPriority
 }
 
-// voiceOwnerState 返回当前占用者的地址、占用者本人最近一个被接受的包时间、占用者优先级。
+// voiceOwnerState 返回当前占用者的地址串、占用者本人最近一个被接受的包时间、占用者优先级。
 // 与 voiceState 的区别：lastOwnerPacketTime 只在"占用者本人"的包被接受时更新，
 // 用于判断占用者是否真正静默（避免他人插入的包刷新计时器导致交替抢话）。
-func (p *currentConnPool) voiceOwnerState() (*net.UDPAddr, time.Time, int) {
+func (p *currentConnPool) voiceOwnerState() (string, time.Time, int) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.UDPAddr, p.lastOwnerPacketTime, p.lastPriority
+	return p.addrStr, p.lastOwnerPacketTime, p.lastPriority
 }
 
-func (p *currentConnPool) setVoiceState(addr *net.UDPAddr, ts time.Time, priority int) {
+func (p *currentConnPool) setVoiceState(addrStr string, ts time.Time, priority int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.UDPAddr = addr
+	p.addrStr = addrStr
 	p.lastVoiceTime = ts
 	p.lastOwnerPacketTime = ts
 	p.lastPriority = priority
 }
 
-func (p *currentConnPool) ctlState() (*net.UDPAddr, time.Time) {
+func (p *currentConnPool) ctlState() (string, time.Time) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.UDPAddr, p.lastCtlTime
+	return p.addrStr, p.lastCtlTime
 }
 
-func (p *currentConnPool) setCtlState(addr *net.UDPAddr, ts time.Time) {
+func (p *currentConnPool) setCtlState(addrStr string, ts time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.UDPAddr = addr
+	p.addrStr = addrStr
 	p.lastCtlTime = ts
 }
 
@@ -327,7 +329,8 @@ func udpServer() {
 
 func udpProcess(conn *net.UDPConn) {
 
-	data := make([]byte, 1460)
+	// 65507 = UDP 数据报理论最大负载；过小会静默截断大包（组列表下发/文本消息）
+	data := make([]byte, 65507)
 
 	for {
 		n, remoteaddr, err := conn.ReadFromUDP(data)
@@ -342,9 +345,7 @@ func udpProcess(conn *net.UDPConn) {
 			continue
 		}
 
-		addTotalStats(func(stats *totalStats) {
-			stats.PacketNumber++
-		})
+		statsPacketNumber.Add(1)
 
 		callsignSSID := getCallsignSSID(nrl.CallSign, nrl.SSID)
 
@@ -357,11 +358,9 @@ func udpProcess(conn *net.UDPConn) {
 
 			//dev.udpAddr = nrl.UDPAddr
 			dev.LastPacketTime = nrl.timeStamp
-			dev.Traffic = dev.Traffic + 42 + 48 + len(nrl.DATA)
 			packetTraffic := 42 + 48 + len(nrl.DATA)
-			addTotalStats(func(stats *totalStats) {
-				stats.Traffic += packetTraffic
-			})
+			dev.Traffic = dev.Traffic + packetTraffic
+			statsTraffic.Add(int64(packetTraffic))
 
 			if nrl.DevModel != 200 {
 				NRL21SetDevDMRID(dev.DMRID, data[:n])
@@ -516,9 +515,7 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 		dev.LastVoiceEndTime = nrl.timeStamp
 
 		dev.VoiceTime = dev.VoiceTime + 63
-		addTotalStats(func(stats *totalStats) {
-			stats.VoiceTime += 63
-		})
+		statsVoiceTime.Add(63)
 
 		// if gp.connPool.allowCALLSSID != "" && gp.connPool.allowCALLSSID != dev.CallSignSSID {
 		// 	return
@@ -555,6 +552,7 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 		}
 
 		dev.udpAddr = nrl.UDPAddr
+		dev.addrStr = nrl.UDPAddrStr
 
 		// 从心跳包提取设备编码能力
 		if nrl.CodecCaps != 0 {
@@ -673,9 +671,12 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 				log.Println("change group err:", err)
 				conn.WriteToUDP(append(packet, (strconv.Itoa(groupid)+",error")...), nrl.UDPAddr)
 			} else {
-				if err := updateDeviceGroupID(dev); err != nil {
-					log.Println("save device group err:", err)
-				}
+				// 内存 GroupID 已即时生效，落库异步执行，避免单连接 DB 抖动阻塞 UDP 循环
+				go func(d *deviceInfo) {
+					if err := updateDeviceGroupID(d); err != nil {
+						log.Println("save device group err:", err)
+					}
+				}(dev)
 				conn.WriteToUDP(append(packet, str...), nrl.UDPAddr)
 			}
 
@@ -714,9 +715,7 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 		dev.LastVoiceEndTime = nrl.timeStamp
 
 		dev.VoiceTime = dev.VoiceTime + 20
-		addTotalStats(func(stats *totalStats) {
-			stats.VoiceTime += 20
-		})
+		statsVoiceTime.Add(20)
 
 		// if gp.connPool.allowCALLSSID != "" && gp.connPool.allowCALLSSID != dev.CallSignSSID {
 		// 	return
@@ -763,7 +762,7 @@ func FullNetOutput(nrl *NRL21packet, dev *deviceInfo, packet []byte) {
 
 	newpacket := NRL21replace200and255dev(conf.APRS.CallSign, 255, nrl.Type, 255, nrl.CallSign, nrl.SSID, nrl.UDPAddr.IP.To4(), dev.DMRID, packet)
 
-	for _, v := range conf.PlatformList {
+	for _, v := range getPlatformList() {
 
 		if v.udpAddr != nil && v.Host != conf.APRS.SelfAddress {
 			globelconn.WriteToUDP(newpacket, v.udpAddr)
@@ -824,15 +823,15 @@ func forwardVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, gp *group) {
 	case 1: //只有一个设备，缺省为环路测试，报文原样返回
 
 		globelconn.WriteToUDP(packet, nrl.UDPAddr)
-		gp.connPool.setVoiceState(nrl.UDPAddr, nrl.timeStamp, dev.Priority)
+		gp.connPool.setVoiceState(nrl.UDPAddrStr, nrl.timeStamp, dev.Priority)
 		callWSHub.publishVoiceFrame(gp, dev.CallSign, dev.SSID, nrl.DATA, nrl.timeStamp, srcCodecType)
 
 	case 2: //如果有2个设备，缺省为全双工通信，报文转发给对方
 		callWSHub.publishVoiceFrame(gp, dev.CallSign, dev.SSID, nrl.DATA, nrl.timeStamp, srcCodecType)
 
-		for _, vv := range gp.connPool.snapshotMap() {
+		for _, vv := range gp.connPool.snapshotList() {
 
-			if vv.udpAddr != nil && nrl.UDPAddrStr != vv.udpAddr.String() && ((vv.Status & 2) != 2) {
+			if vv.udpAddr != nil && nrl.UDPAddrStr != vv.addrStr && ((vv.Status & 2) != 2) {
 
 				if vv.DevModel == 200 && ((vv.Status & 4) != 4) {
 					newpacket := NRL21replace200and255dev(vv.CallSign, vv.SSID, nrl.Type, 200, nrl.CallSign, nrl.SSID, nrl.UDPAddr.IP.To4(), dev.DMRID, packet)
@@ -870,11 +869,7 @@ func forwardVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, gp *group) {
 		}
 
 		// 抢话判定
-		lastUDPAddr, lastOwnerTime, lastPriority := gp.connPool.voiceOwnerState()
-		lastAddrStr := ""
-		if lastUDPAddr != nil {
-			lastAddrStr = lastUDPAddr.String()
-		}
+		lastAddrStr, lastOwnerTime, lastPriority := gp.connPool.voiceOwnerState()
 
 		isOwner := nrl.UDPAddrStr == lastAddrStr
 		higherPriority := dev.Priority > lastPriority
@@ -885,12 +880,12 @@ func forwardVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, gp *group) {
 			return
 		}
 
-		gp.connPool.setVoiceState(nrl.UDPAddr, nrl.timeStamp, dev.Priority)
+		gp.connPool.setVoiceState(nrl.UDPAddrStr, nrl.timeStamp, dev.Priority)
 		callWSHub.publishVoiceFrame(gp, dev.CallSign, dev.SSID, nrl.DATA, nrl.timeStamp, srcCodecType)
 
 		for _, vv := range gp.connPool.snapshotList() {
 
-			if vv.udpAddr != nil && nrl.UDPAddrStr != vv.udpAddr.String() && (vv.Status&2) != 2 {
+			if vv.udpAddr != nil && nrl.UDPAddrStr != vv.addrStr && (vv.Status&2) != 2 {
 
 				if vv.DevModel == 200 {
 					newpacket := NRL21replace200and255dev(vv.CallSign, vv.SSID, nrl.Type, 200, nrl.CallSign, nrl.SSID, nrl.UDPAddr.IP.To4(), dev.DMRID, packet)
@@ -956,11 +951,7 @@ func forwardServerVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, conn *
 
 	}
 
-	lastUDPAddr, lastVoiceTime, _ := gp.connPool.voiceState()
-	lastAddrStr := ""
-	if lastUDPAddr != nil {
-		lastAddrStr = lastUDPAddr.String()
-	}
+	lastAddrStr, lastVoiceTime, _ := gp.connPool.voiceState()
 
 	if (nrl.UDPAddrStr != lastAddrStr) && nrl.timeStamp.Sub(lastVoiceTime) < 200*time.Millisecond {
 
@@ -972,7 +963,7 @@ func forwardServerVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, conn *
 		//否则重新让新设备抢占语音权，并更新上次报文时间
 	} else {
 
-		gp.connPool.setVoiceState(nrl.UDPAddr, nrl.timeStamp, dev.Priority)
+		gp.connPool.setVoiceState(nrl.UDPAddrStr, nrl.timeStamp, dev.Priority)
 
 	}
 
@@ -991,7 +982,7 @@ func forwardServerVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, conn *
 
 	for _, vv := range gp.connPool.snapshotList() {
 
-		if vv.udpAddr != nil && nrl.UDPAddrStr != vv.udpAddr.String() && (vv.Status&2) != 2 {
+		if vv.udpAddr != nil && nrl.UDPAddrStr != vv.addrStr && (vv.Status&2) != 2 {
 
 			//转发给200设备
 			if vv.DevModel == 200 {
@@ -1029,9 +1020,9 @@ func forwardMsg(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDPC
 
 		newpacket := NRL21replace200and255dev(nrl.OriginalCallsign, nrl.OriginalSSID, nrl.Type, 200, nrl.CallSign, nrl.SSID, nrl.OriginalIP, nrl.DMRID, packet)
 
-		for kk, vv := range connpool.snapshotMap() {
+		for _, vv := range connpool.snapshotList() {
 
-			if clientAddrStr != kk {
+			if clientAddrStr != vv.addrStr {
 
 				//马工3188盒子，部分盒子使用5类型控制3188信道，会干扰，临时关闭
 				if vv.DevModel == 9 || vv.DevModel == 255 || vv.SSID == 255 {
@@ -1060,9 +1051,9 @@ func forwardMsg(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDPC
 	if nrl.DevModel == 255 || nrl.SSID == 255 {
 		newpacket := NRL21replace200and255dev(nrl.OriginalCallsign, nrl.OriginalSSID, nrl.Type, 255, nrl.CallSign, nrl.SSID, nrl.OriginalIP, nrl.DMRID, packet)
 
-		for kk, vv := range connpool.snapshotMap() {
+		for _, vv := range connpool.snapshotList() {
 
-			if clientAddrStr != kk {
+			if clientAddrStr != vv.addrStr {
 				// 255不转发给255设备
 				if vv.DevModel == 9 || vv.DevModel == 255 || vv.SSID == 255 {
 					continue
@@ -1081,9 +1072,9 @@ func forwardMsg(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDPC
 	}
 
 	//普通设备转发给其他设备
-	for kk, vv := range connpool.snapshotMap() {
+	for _, vv := range connpool.snapshotList() {
 
-		if clientAddrStr != kk {
+		if clientAddrStr != vv.addrStr {
 
 			//普通设备转发给200设备
 			if vv.DevModel == 200 {
@@ -1134,15 +1125,15 @@ func forwardCtl(nrl *NRL21packet, packet []byte, conn *net.UDPConn, gp *group) {
 		//fmt.Println("case 1 :", clientAddrStr)
 		conn.WriteToUDP(packet, nrl.UDPAddr)
 
-		gp.connPool.setCtlState(nrl.UDPAddr, nrl.timeStamp)
+		gp.connPool.setCtlState(nrl.UDPAddrStr, nrl.timeStamp)
 
 	case 2: //如果有2个设备，缺省为全双工通信，报文转发给对方
 
-		for kk, vv := range gp.connPool.snapshotMap() {
+		for _, vv := range gp.connPool.snapshotList() {
 			//删除超时的会话
 
 			//报文转发给其它设备，不包含自己
-			if nrl.UDPAddrStr != kk && (vv.Status&2) != 2 {
+			if nrl.UDPAddrStr != vv.addrStr && (vv.Status&2) != 2 {
 				//fmt.Println("case 2 :", clientAddrStr)
 				if vv.DevModel == 200 {
 					continue
@@ -1166,11 +1157,7 @@ func forwardCtl(nrl *NRL21packet, packet []byte, conn *net.UDPConn, gp *group) {
 	default: //3个或3个以上设备，只允许一个设备发送语音，其它接收
 
 		// 如果当前有会话，并且会话结束时间没超过1秒， 那么不转发其它设备报文,  丢弃无效语音
-		lastUDPAddr, lastCtlTime := gp.connPool.ctlState()
-		lastAddrStr := ""
-		if lastUDPAddr != nil {
-			lastAddrStr = lastUDPAddr.String()
-		}
+		lastAddrStr, lastCtlTime := gp.connPool.ctlState()
 
 		if nrl.UDPAddrStr != lastAddrStr && nrl.timeStamp.Sub(lastCtlTime) < 200*time.Millisecond {
 
@@ -1185,17 +1172,12 @@ func forwardCtl(nrl *NRL21packet, packet []byte, conn *net.UDPConn, gp *group) {
 			return
 			//否则重新让新设备抢占语音权，并更新上次报文时间
 		} else {
-			gp.connPool.setCtlState(nrl.UDPAddr, nrl.timeStamp)
+			gp.connPool.setCtlState(nrl.UDPAddrStr, nrl.timeStamp)
 		}
 
-		for kk, vv := range gp.connPool.snapshotMap() {
-			// if nrl.timeStamp.Sub(vv.lastTime) > 5*time.Second {
-			// 	log.Println("device timeout offline:", nrl.CallSign, "-", nrl.SSID, " ", kk)
-			// 	delete(gp.connPool.devConnMap, kk)
-			// 	continue
-			// }
+		for _, vv := range gp.connPool.snapshotList() {
 
-			if vv.udpAddr != nil && nrl.UDPAddrStr != kk && (vv.Status&2) != 2 {
+			if vv.udpAddr != nil && nrl.UDPAddrStr != vv.addrStr && (vv.Status&2) != 2 {
 
 				if vv.DevModel == 200 {
 					continue

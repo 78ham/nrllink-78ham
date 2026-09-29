@@ -171,8 +171,7 @@ func syncPlatformServerList() error {
 		list[i].udpAddr = targetAddr
 	}
 
-	PlatformList = list
-	conf.PlatformList = list
+	setPlatformList(list)
 	return nil
 }
 

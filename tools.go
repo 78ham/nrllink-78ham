@@ -4,7 +4,12 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 )
+
+// apiHTTPClient 统一的外部 API HTTP 客户端（带超时）。
+// http.DefaultClient 无超时，外部服务挂起会永久阻塞调用方 goroutine
+var apiHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 type Response struct {
 	Code    int    `json:"code"`
@@ -49,7 +54,7 @@ func checkHttpRequestTokenAndRight(w http.ResponseWriter, req *http.Request, rol
 		return nil, ResTokenErr
 	}
 
-	u, err := getuser(token.Username)
+	u, err := getUserCached(token.Username)
 
 	if err != nil {
 		//writeJSONResponse(w, 50018, "账号错误", nil)

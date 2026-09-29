@@ -93,7 +93,7 @@ func sendPhoneCodeOkTypeMsg(openid, name, phone string) {
 		//ClientMsgID: time.Now().String(),
 		Data: sm}
 
-	SendWeixinMs(conf.WeiXin.WeiXinAccessToken.AccessToken, tm1, 0)
+	SendWeixinMs(getWeixinToken(), tm1, 0)
 
 }
 
@@ -110,7 +110,7 @@ func SendLoginSucessTypeMsg(ipaddr string, employee *userinfo) {
 		//ClientMsgID: time.Now().String(),
 		Data: sm}
 
-	SendWeixinMs(conf.WeiXin.WeiXinAccessToken.AccessToken, tm1, 0)
+	SendWeixinMs(getWeixinToken(), tm1, 0)
 
 }
 
@@ -129,13 +129,13 @@ func SendLoginFailTypeMsg(ipaddr, Reason string, emp *userinfo) {
 		//ClientMsgID: time.Now().String(),
 		Data: sm}
 
-	SendWeixinMs(conf.WeiXin.WeiXinAccessToken.AccessToken, tm1, 0)
+	SendWeixinMs(getWeixinToken(), tm1, 0)
 
 }
 
 // SendWeixinMs  send
 func GetWXTemplateID(accessToken string, data getMsgID) (string, error) {
-	client := &http.Client{}
+	client := apiHTTPClient
 	content, err := jsonextra.Marshal(data)
 
 	if err != nil {
@@ -200,7 +200,7 @@ type WXTemplateList struct {
 func GetWXTemplateList(accessToken string) (*WXTemplateList, error) {
 
 	//	fmt.Println("token:"+accessToken+"\n", string(content))
-	resp, err := http.Get(strings.Join([]string{`https://api.weixin.qq.com/cgi-bin/template/get_all_private_template`, "?access_token=", accessToken}, ""))
+	resp, err := apiHTTPClient.Get(strings.Join([]string{`https://api.weixin.qq.com/cgi-bin/template/get_all_private_template`, "?access_token=", accessToken}, ""))
 
 	if err != nil {
 		log.Println("wxmsg get template list err:", err)
@@ -231,7 +231,7 @@ func GetWXTemplateList(accessToken string) (*WXTemplateList, error) {
 
 func DelWXTemplate(AccessToken, templateID string) error {
 
-	client := &http.Client{}
+	client := apiHTTPClient
 
 	url := strings.Join([]string{`https://api.weixin.qq.com/cgi-bin/template/del_private_template`, "?access_token=", AccessToken}, "")
 	// content, err := jsonextra.Marshal(data)

@@ -881,8 +881,8 @@ func checktoken(w http.ResponseWriter, req *http.Request) (*userinfo, error) {
 		return nil, fmt.Errorf("令牌错误，登录超时，请重新登录")
 	}
 
-	// 根据令牌中的用户名获取用户信息，如果获取失败，向客户端写入错误响应并返回错误信息
-	emp, err := getuser(token.Username)
+	// 根据令牌中的用户名获取用户信息（内存索引优先，miss 回源库），如果获取失败，向客户端写入错误响应并返回错误信息
+	emp, err := getUserCached(token.Username)
 	if err != nil {
 		w.Write(ResAccountErr)
 		return nil, err

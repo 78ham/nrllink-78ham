@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -107,16 +106,16 @@ func (a *APRSTV) GetNRL() {
 	uri, err := url.Parse(apiURL)
 	if err != nil {
 		fmt.Println("Error parsing URL:", err)
-		conf.PlatformList = PlatformList
+		setPlatformList(PlatformList)
 		return
 	}
 	uri.RawQuery = params.Encode() // 自动编码
 
 	// 发起 POST 请求（无 body）
-	resp, err := http.Post(uri.String(), "", nil)
+	resp, err := apiHTTPClient.Post(uri.String(), "", nil)
 	if err != nil {
 		fmt.Println("Request failed:", err)
-		conf.PlatformList = PlatformList
+		setPlatformList(PlatformList)
 		return
 	}
 	defer resp.Body.Close()
@@ -125,7 +124,7 @@ func (a *APRSTV) GetNRL() {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Println("Error reading response body:", err)
-		conf.PlatformList = PlatformList
+		setPlatformList(PlatformList)
 		return
 	}
 
@@ -136,23 +135,24 @@ func (a *APRSTV) GetNRL() {
 	err = json.Unmarshal(body, &apiResponse)
 	if err != nil {
 		fmt.Println("Error unmarshaling JSON response:", err)
-		conf.PlatformList = PlatformList
+		setPlatformList(PlatformList)
 		return
 	}
-
-	conf.PlatformList = []Platformitem{}
 
 	platformDevOnline := 0
 	platformDevTotal := 0
 
 	if len(apiResponse.Data) == 0 {
-		conf.PlatformList = PlatformList
+		setPlatformList(PlatformList)
 		updateTotalStats(func(stats *totalStats) {
 			stats.PlatformDevOnline = 0
 			stats.PlatformDevTotal = 0
 		})
 		return
 	}
+
+	// 本地构建完整列表，最后一次性替换，读者不会看到中间状态
+	newList := []Platformitem{}
 
 	// 用于按 host:port 去重，防止同一服务器多条beacon导致重复转发
 	seen := make(map[string]bool)
@@ -199,10 +199,11 @@ func (a *APRSTV) GetNRL() {
 		platformDevOnline += online
 		platformDevTotal += total
 
-		conf.PlatformList = append(conf.PlatformList, p)
+		newList = append(newList, p)
 
 		//fmt.Printf("name:%s, Ower:%s, host:%s, port:%s, online:%d, total:%d,\n", name, item.Scall, host, port, online, total)
 	}
+	setPlatformList(newList)
 	updateTotalStats(func(stats *totalStats) {
 		stats.PlatformDevOnline = platformDevOnline
 		stats.PlatformDevTotal = platformDevTotal
@@ -227,7 +228,7 @@ func (a *APRSTV) GetNRLStat() {
 	uri.RawQuery = params.Encode() // 自动编码
 
 	// 发起 POST 请求（无 body）
-	resp, err := http.Post(uri.String(), "", nil)
+	resp, err := apiHTTPClient.Post(uri.String(), "", nil)
 	if err != nil {
 		fmt.Println("Request failed:", err)
 		return

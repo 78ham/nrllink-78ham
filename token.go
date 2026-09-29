@@ -32,8 +32,11 @@ type Claims struct {
 
 // 生成 JWT token
 func GenerateToken(username string, roles []string) (string, error) {
-	// 设置过期时间
+	// 设置过期时间：Security.SessionTimeout（秒）可选配置，未配置时保持历史 30 天默认
 	expirationTime := time.Now().Add(24 * 30 * time.Hour)
+	if conf.Security.SessionTimeout > 0 {
+		expirationTime = time.Now().Add(time.Duration(conf.Security.SessionTimeout) * time.Second)
+	}
 	claims := &Claims{
 		Username: username,
 		Roles:    roles,

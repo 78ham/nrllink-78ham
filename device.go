@@ -60,6 +60,14 @@ func (j *jsonapi) httpDevicesList(w http.ResponseWriter, req *http.Request) {
 
 }
 
+// deviceInfoView 用于 httpDeviceList 的序列化视图：
+// 内嵌 deviceInfo 共享原对象，非 admin 场景用外层同名字段屏蔽 DeviceParm（JSON 序列化时
+// 外层字段优先），从而不改共享设备对象本身
+type deviceInfoView struct {
+	*deviceInfo
+	DeviceParm *control `json:"device_parm"`
+}
+
 func (j *jsonapi) httpDeviceList(w http.ResponseWriter, req *http.Request) {
 	sethttphead(w)
 
@@ -82,7 +90,7 @@ func (j *jsonapi) httpDeviceList(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	devicelist := make(map[int]*deviceInfo, 10)
+	devicelist := make(map[int]*deviceInfoView, 10)
 
 	isadmin := checkrole(u, []string{"admin"})
 
@@ -100,12 +108,13 @@ func (j *jsonapi) httpDeviceList(w http.ResponseWriter, req *http.Request) {
 
 		dev := vv
 
-		if !isadmin && dev.CallSign != u.CallSign {
-
-			dev.DeviceParm = nil
+		if isadmin || dev.CallSign == u.CallSign {
+			devicelist[id] = &deviceInfoView{deviceInfo: dev, DeviceParm: dev.DeviceParm}
+		} else {
+			// 非 admin 不能看到设备参数：用视图类型屏蔽字段，
+			// 不修改共享的 deviceInfo（否则会导致 UDP 侧重复下发参数查询/接口 panic）
+			devicelist[id] = &deviceInfoView{deviceInfo: dev}
 		}
-
-		devicelist[id] = dev
 		id++
 
 	}
