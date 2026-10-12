@@ -62,6 +62,10 @@ func checkHttpRequestTokenAndRight(w http.ResponseWriter, req *http.Request, rol
 		return nil, ResAccountErr
 	}
 
+	if token.TokenVersion > 0 && u.TokenVersion > 0 && token.TokenVersion != u.TokenVersion {
+		return nil, ResTokenErr
+	}
+
 	if !checkrole(u, rolelist) {
 
 		//log.Println("right err :", rolelist, u.Roles)

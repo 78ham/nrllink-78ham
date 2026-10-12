@@ -27,6 +27,7 @@ services:
     volumes:
       - nrllink-data:/nrllink/data
       - nrllink-uploads:/nrllink/www/uploads
+      - nrllink-backups:/nrllink/backups
       # 可选：自定义平台名 / ICP / APRS / 微信 等配置时取消注释并准备 config/udphub.yaml
       # - ./config/udphub.yaml:/nrllink/conf/udphub.yaml:ro
     networks:
@@ -47,3 +48,4 @@ networks:
 volumes:
   nrllink-data:    # SQLite 数据库
   nrllink-uploads: # 后台上传的图片等运行期文件
+  nrllink-backups: # 数据库定时快照备份卷

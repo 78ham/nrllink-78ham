@@ -9,8 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/mutecomm/go-sqlcipher/v4"
 	yaml "gopkg.in/yaml.v3"
 )
 
@@ -46,12 +47,16 @@ type Platformitem struct {
 
 type config struct {
 	System struct {
-		Port        string `yaml:"Port" json:"port"`
-		Logpath     string `yaml:"LogPath" json:"log_path"`
-		LicensePath string `yaml:"LicensePath" json:"license_path"`
-		DBfile      string `yaml:"DBfile" json:"dbfile"`
-		IPfile      string `yaml:"IPfile" json:"ipfile"`
-		CallLogPath string `yaml:"CallLogPath" json:"calllog_path"`
+		Port          string `yaml:"Port" json:"port"`
+		Logpath       string `yaml:"LogPath" json:"log_path"`
+		LicensePath   string `yaml:"LicensePath" json:"license_path"`
+		DBfile        string `yaml:"DBfile" json:"dbfile"`
+		IPfile        string `yaml:"IPfile" json:"ipfile"`
+		CallLogPath   string `yaml:"CallLogPath" json:"calllog_path"`
+		LicenseEncKey string `yaml:"LicenseEncKey" json:"license_enc_key"`
+		DBEncKey      string `yaml:"DBEncKey" json:"db_enc_key"`
+		FieldEncKey   string `yaml:"FieldEncKey" json:"field_enc_key"`
+		FieldPepper   string `yaml:"FieldPepper" json:"field_pepper"`
 	} `yaml:"System" json:"system"`
 
 	Web struct {
@@ -170,6 +175,7 @@ func (c *config) init() {
 
 	cc := flag.String("c", confpath, "config file path and name")
 	oo := flag.String("o", "", "print config content to stdout and exit , yaml or json format")
+	backupOut := flag.String("backup", "", "backup database snapshot to target file and exit")
 
 	flag.Parse()
 
@@ -239,6 +245,47 @@ func (c *config) init() {
 	if v := os.Getenv("NRL_TOKEN_KEY"); v != "" {
 		conf.Web.TokenKey = v
 	}
+	if v := os.Getenv("NRL_LICENSE_KEY"); v != "" {
+		conf.System.LicenseEncKey = v
+	}
+	if v := os.Getenv("NRL_DB_KEY"); v != "" {
+		conf.System.DBEncKey = v
+	}
+	if v := os.Getenv("NRL_FIELD_KEY"); v != "" {
+		conf.System.FieldEncKey = v
+	}
+	if v := os.Getenv("NRL_FIELD_PEPPER"); v != "" {
+		conf.System.FieldPepper = v
+	}
+
+	if conf.System.LicenseEncKey != "" {
+		licenseAESKey = deriveKey(conf.System.LicenseEncKey)
+	}
+	if conf.System.FieldEncKey != "" {
+		fieldAESKey = deriveKey(conf.System.FieldEncKey)
+	}
+	if conf.System.FieldPepper != "" {
+		fieldPepperKey = []byte(conf.System.FieldPepper)
+	} else {
+		fieldPepperKey = []byte("nrllink_default_pepper_key_2026")
+	}
+
+	// 命令行触发数据库快速备份
+	if *backupOut != "" {
+		backupDB := getDB()
+		target := filepath.ToSlash(*backupOut)
+		if err := os.MkdirAll(filepath.Dir(*backupOut), 0755); err != nil {
+			log.Fatalf("创建备份目录失败: %v", err)
+		}
+		_ = os.Remove(*backupOut)
+		_, err := backupDB.Exec(fmt.Sprintf("VACUUM INTO '%s';", target))
+		backupDB.Close()
+		if err != nil {
+			log.Fatalf("执行数据库热备份失败: %v", err)
+		}
+		log.Printf("[backup] 数据库快照备份成功: %s", *backupOut)
+		os.Exit(0)
+	}
 }
 
 // Exist 判断文件存在
@@ -249,6 +296,47 @@ func Exist(filename string) bool {
 }
 
 var db *sql.DB
+
+func migrateToSQLCipher(dbFile string, key string) error {
+	backupFile := fmt.Sprintf("%s.bak.%d", dbFile, time.Now().Unix())
+	if data, err := os.ReadFile(dbFile); err == nil {
+		_ = os.WriteFile(backupFile, data, 0644)
+	}
+
+	tempFile := dbFile + ".migrated"
+	_ = os.Remove(tempFile)
+
+	dbPlain, err := sql.Open("sqlite3", dbFile)
+	if err != nil {
+		return err
+	}
+	defer dbPlain.Close()
+
+	attachSQL := fmt.Sprintf("ATTACH DATABASE '%s' AS encrypted KEY '%s';", filepath.ToSlash(tempFile), key)
+	if _, err := dbPlain.Exec(attachSQL); err != nil {
+		return fmt.Errorf("attach encrypted db failed: %w", err)
+	}
+
+	if _, err := dbPlain.Exec("SELECT sqlcipher_export('encrypted');"); err != nil {
+		return fmt.Errorf("sqlcipher_export failed: %w", err)
+	}
+
+	if _, err := dbPlain.Exec("DETACH DATABASE encrypted;"); err != nil {
+		return fmt.Errorf("detach encrypted db failed: %w", err)
+	}
+
+	dbPlain.Close()
+
+	if err := os.Rename(tempFile, dbFile); err != nil {
+		if data, err := os.ReadFile(tempFile); err == nil {
+			_ = os.WriteFile(dbFile, data, 0644)
+			_ = os.Remove(tempFile)
+		}
+	}
+
+	log.Printf("[sqlcipher] 已成功将明文 SQLite 数据库迁移为 SQLCipher 加密数据库，原库备份至: %s", backupFile)
+	return nil
+}
 
 func getDB() *sql.DB {
 
@@ -262,12 +350,41 @@ func getDB() *sql.DB {
 
 	if !Exist(conf.System.DBfile) {
 		log.Println("检测到首次部署，将自动创建数据库")
+	} else if conf.System.DBEncKey != "" {
+		// 探测已有数据库是否为旧明文数据库，若是则自动执行 SQLCipher 迁移
+		probeDSN := "file:" + conf.System.DBfile + "?_pragma_key=" + conf.System.DBEncKey
+		probeDB, err := sql.Open("sqlite3", probeDSN)
+		if err == nil {
+			var test string
+			err = probeDB.QueryRow("PRAGMA quick_check").Scan(&test)
+			probeDB.Close()
+			if err != nil || test != "ok" {
+				// 带 key 打开失败，探测是否为明文库
+				plainDB, plainErr := sql.Open("sqlite3", conf.System.DBfile)
+				if plainErr == nil {
+					var plainTest string
+					if plainDB.QueryRow("PRAGMA quick_check").Scan(&plainTest) == nil && plainTest == "ok" {
+						plainDB.Close()
+						if err := migrateToSQLCipher(conf.System.DBfile, conf.System.DBEncKey); err != nil {
+							log.Fatalf("自动迁移到加密数据库失败: %v", err)
+						}
+					} else {
+						plainDB.Close()
+					}
+				}
+			}
+		}
 	}
 
 	var err error
 
+	dsn := "file:" + conf.System.DBfile + "?_busy_timeout=5000&_journal_mode=WAL&_synchronous=NORMAL"
+	if conf.System.DBEncKey != "" {
+		dsn += "&_pragma_key=" + conf.System.DBEncKey + "&_pragma_cipher_page_size=4096"
+	}
+
 	// WAL：读写不再互斥；synchronous=NORMAL：WAL 下安全且避免每次 commit fsync
-	db, err = sql.Open("sqlite3", "file:"+conf.System.DBfile+"?_busy_timeout=5000&_journal_mode=WAL&_synchronous=NORMAL")
+	db, err = sql.Open("sqlite3", dsn)
 
 	if err != nil {
 		log.Fatal(err)
@@ -356,6 +473,27 @@ func updatedb() {
 		"ALTER TABLE devices ADD COLUMN rf_type INTEGER DEFAULT 0;",
 		// 清理 users 表 NULL 值（扫描到 string/int 会报错，旧库补默认值）
 		"UPDATE users SET gird=COALESCE(gird,''), birthday=COALESCE(birthday,''), sex=COALESCE(sex,0), avatar=COALESCE(avatar,''), address=COALESCE(address,''), introduction=COALESCE(introduction,''), last_login_time=COALESCE(last_login_time,''), openid=COALESCE(openid,''), nickname=COALESCE(nickname,''), pid=COALESCE(pid,''), last_login_ip=COALESCE(last_login_ip,''), expire_time=COALESCE(expire_time,''), mdcid=COALESCE(mdcid,''), dmrid=COALESCE(dmrid,0);",
+		"ALTER TABLE users ADD COLUMN lock_until INTEGER DEFAULT 0;",
+		"ALTER TABLE users ADD COLUMN token_version INTEGER DEFAULT 1;",
+		"ALTER TABLE users ADD COLUMN phone_hash TEXT DEFAULT '';",
+		"ALTER TABLE registers ADD COLUMN phone_hash TEXT DEFAULT '';",
+		"CREATE INDEX IF NOT EXISTS idx_users_phone_hash ON users(phone_hash);",
+		"CREATE INDEX IF NOT EXISTS idx_registers_phone_hash ON registers(phone_hash);",
+		"ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT '';",
+		"ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0;",
+		`CREATE TABLE IF NOT EXISTS user_credentials (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			credential_id BLOB NOT NULL,
+			public_key BLOB NOT NULL,
+			attestation_type TEXT DEFAULT '',
+			aaguid BLOB,
+			sign_count INTEGER DEFAULT 0,
+			name TEXT DEFAULT '',
+			create_time TEXT,
+			last_used_time TEXT
+		);`,
+		"CREATE INDEX IF NOT EXISTS idx_user_credentials_user_id ON user_credentials(user_id);",
 	}
 
 	// 记录已执行的迁移语句,保证每条只执行一次,避免每次启动重复执行
@@ -383,6 +521,52 @@ func updatedb() {
 		}
 		if _, err := db.Exec(`INSERT OR IGNORE INTO schema_migrations(stmt, applied_at) VALUES(?, CURRENT_TIMESTAMP)`, stmt); err != nil {
 			log.Printf("record migration err: %v, stmt: %s", err, stmt)
+		}
+	}
+
+	backfillPhoneHash()
+}
+
+func backfillPhoneHash() {
+	rows, err := db.Query("SELECT id, phone FROM users WHERE (phone_hash IS NULL OR phone_hash = '') AND phone != ''")
+	if err == nil {
+		defer rows.Close()
+		type uRecord struct {
+			id    int
+			phone string
+		}
+		var updates []uRecord
+		for rows.Next() {
+			var r uRecord
+			if rows.Scan(&r.id, &r.phone) == nil {
+				updates = append(updates, r)
+			}
+		}
+		for _, u := range updates {
+			plainPhone := decryptField(fieldAESKey, u.phone)
+			hash := hashIndex(fieldPepperKey, plainPhone)
+			_, _ = db.Exec("UPDATE users SET phone_hash=? WHERE id=?", hash, u.id)
+		}
+	}
+
+	rRows, rErr := db.Query("SELECT id, phone FROM registers WHERE (phone_hash IS NULL OR phone_hash = '') AND phone != ''")
+	if rErr == nil {
+		defer rRows.Close()
+		type rRecord struct {
+			id    int
+			phone string
+		}
+		var rUpdates []rRecord
+		for rRows.Next() {
+			var r rRecord
+			if rRows.Scan(&r.id, &r.phone) == nil {
+				rUpdates = append(rUpdates, r)
+			}
+		}
+		for _, item := range rUpdates {
+			plainPhone := decryptField(fieldAESKey, item.phone)
+			hash := hashIndex(fieldPepperKey, plainPhone)
+			_, _ = db.Exec("UPDATE registers SET phone_hash=? WHERE id=?", hash, item.id)
 		}
 	}
 }

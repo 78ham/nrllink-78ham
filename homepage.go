@@ -238,7 +238,7 @@ func (j *jsonapi) httpAdminHomepageImageUpload(w http.ResponseWriter, req *http.
 	}
 
 	ext := filepath.Ext(header.Filename)
-	allowedExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true, ".svg": true}
+	allowedExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true}
 	if !allowedExts[strings.ToLower(ext)] {
 		w.Write(ResParmErr)
 		return

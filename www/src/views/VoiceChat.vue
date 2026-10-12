@@ -60,9 +60,30 @@ const CodecNames: Record<number, string> = {
   16: 'Codec2 3200'
 }
 
-function connectWS() {
+async function connectWS() {
   const token = userStore.token
-  ws = new WebSocket(`ws://${location.host}/ws/calls?token=${token}`)
+  let wsUrl = `ws://${location.host}/ws/calls`
+  if (token) {
+    try {
+      const res = await fetch('/api/v1/auth/ws-ticket', {
+        method: 'POST',
+        headers: { 'x-token': token }
+      })
+      if (res.ok) {
+        const json = await res.json()
+        if (json.code === 20000 && json.data?.ticket) {
+          wsUrl += `?ticket=${json.data.ticket}`
+        } else {
+          wsUrl += `?token=${token}`
+        }
+      } else {
+        wsUrl += `?token=${token}`
+      }
+    } catch {
+      wsUrl += `?token=${token}`
+    }
+  }
+  ws = new WebSocket(wsUrl)
   ws.binaryType = 'arraybuffer'
 
   ws.onmessage = async (e) => {

@@ -25,21 +25,23 @@ func initTokenKey() {
 
 // 定义 payload 的结构
 type Claims struct {
-	Username string   `json:"username"`
-	Roles    []string `json:"roles"`
+	Username     string   `json:"username"`
+	Roles        []string `json:"roles"`
+	TokenVersion int      `json:"token_version,omitempty"`
 	jwt.RegisteredClaims
 }
 
 // 生成 JWT token
-func GenerateToken(username string, roles []string) (string, error) {
+func GenerateToken(username string, roles []string, tokenVersion int) (string, error) {
 	// 设置过期时间：Security.SessionTimeout（秒）可选配置，未配置时保持历史 30 天默认
 	expirationTime := time.Now().Add(24 * 30 * time.Hour)
 	if conf.Security.SessionTimeout > 0 {
 		expirationTime = time.Now().Add(time.Duration(conf.Security.SessionTimeout) * time.Second)
 	}
 	claims := &Claims{
-		Username: username,
-		Roles:    roles,
+		Username:     username,
+		Roles:        roles,
+		TokenVersion: tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "nrllink",
 			ExpiresAt: jwt.NewNumericDate(expirationTime),

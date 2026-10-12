@@ -13,6 +13,7 @@ interface User {
   status: number
   must_change_pwd?: boolean
   default_admin?: boolean
+  totp_enabled?: number
 }
 
 export const useUserStore = defineStore('user', () => {
@@ -28,9 +29,32 @@ export const useUserStore = defineStore('user', () => {
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const json = await res.json()
     if (json.code !== 20000) throw new Error(json.message || '登录失败')
-    token.value = json.data.token
-    localStorage.setItem('token', token.value)
+    if (json.data?.token) {
+      token.value = json.data.token
+      localStorage.setItem('token', token.value)
+    }
     return json.data
+  }
+
+  async function loginTOTP(ticket: string, code: string) {
+    const res = await fetch(`${API}/auth/totp/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket, code })
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const json = await res.json()
+    if (json.code !== 20000) throw new Error(json.message || '两步验证失败')
+    if (json.data?.token) {
+      token.value = json.data.token
+      localStorage.setItem('token', token.value)
+    }
+    return json.data
+  }
+
+  function setToken(newToken: string) {
+    token.value = newToken
+    localStorage.setItem('token', newToken)
   }
 
   async function fetchUser() {
@@ -109,5 +133,5 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem('token')
   }
 
-  return { token, user, login, fetchUser, changePassword, fetchUsers, createUser, deleteUser, logout }
+  return { token, user, login, loginTOTP, setToken, fetchUser, changePassword, fetchUsers, createUser, deleteUser, logout }
 })

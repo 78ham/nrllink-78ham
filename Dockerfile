@@ -28,11 +28,12 @@ RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o udphub .
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates tzdata opus opusfile wget
 COPY --from=codec2build /codec2/build/src/libcodec2.so* /usr/lib/
-RUN mkdir -p /nrllink/udphub /nrllink/data /nrllink/conf /nrllink/www/uploads
+RUN mkdir -p /nrllink/udphub /nrllink/data /nrllink/conf /nrllink/www/uploads /nrllink/backups
 COPY --from=builder /app/udphub /nrllink/udphub/udphub
 COPY docker/udphub.default.yaml /nrllink/udphub/udphub.yaml
 COPY start.sh /nrllink/start.sh
-RUN chmod +x /nrllink/start.sh
+COPY backup.sh /nrllink/backup.sh
+RUN chmod +x /nrllink/start.sh /nrllink/backup.sh
 
 WORKDIR /nrllink
 EXPOSE 9000 60050/udp

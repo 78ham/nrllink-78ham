@@ -651,7 +651,7 @@ func (j *jsonapi) httpMPuserLogin(w http.ResponseWriter, req *http.Request) {
 		user.SchoolName = user2.SchoolName
 		user.NickName = user2.NickName
 		user.Headimgurl = user2.Headimgurl
-		user.CRMToken, err = GenerateToken(user.Phone, []string{""})
+		user.CRMToken, err = GenerateToken(user.Phone, []string{""}, 1)
 
 		if err != nil {
 			log.Println("微信登录失败，生成访问令牌失败", err)

@@ -30,15 +30,27 @@ type reguser struct {
 
 func createRegUser(e *reguser) error {
 
+	if err := validatePassword(e.Password, e.CallSign, e.Phone); err != nil {
+		return err
+	}
+
 	password, err := bcrypt.GenerateFromPassword([]byte(e.Password), bcrypt.DefaultCost)
 
 	if err != nil {
 		return err
 	}
 
+	phoneToStore := e.Phone
+	if fieldAESKey != nil {
+		if enc, err := encryptField(fieldAESKey, e.Phone); err == nil {
+			phoneToStore = enc
+		}
+	}
+	phoneHash := hashIndex(fieldPepperKey, e.Phone)
+
 	// 插入用户数据到数据库
-	query := `INSERT INTO registers (callsign, name, phone,sex,address,birthday,mail, password, op_cert_path, license_path, status,note,create_time,update_time) 
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO registers (callsign, name, phone,sex,address,birthday,mail, password, op_cert_path, license_path, status,note,create_time,update_time,phone_hash) 
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 	stmt, err := db.Prepare(query)
 
@@ -48,7 +60,7 @@ func createRegUser(e *reguser) error {
 	}
 	defer stmt.Close()
 
-	res, err := stmt.Exec(e.CallSign, e.Name, e.Phone, e.Sex, e.Address, e.Birthday, e.Mail, password, e.OpCertPath, e.LicensePath, e.Status, e.Note, e.CreateTime, e.UpdateTime)
+	res, err := stmt.Exec(e.CallSign, e.Name, phoneToStore, e.Sex, e.Address, e.Birthday, e.Mail, password, e.OpCertPath, e.LicensePath, e.Status, e.Note, e.CreateTime, e.UpdateTime, phoneHash)
 	if err != nil {
 		log.Println("add reg user failed 2, ", err, '\n', query)
 
@@ -116,6 +128,7 @@ func selectReguser(w string, args []interface{}, p string, sort string) ([]regus
 			continue
 		}
 
+		r.Phone = decryptField(fieldAESKey, r.Phone)
 		emp = append(emp, r)
 	}
 	if err = rows.Err(); err != nil {
@@ -161,9 +174,18 @@ func addUserReg(ctx context.Context, u *reguser) error {
 
 	// 插入数据
 
+	phoneDecrypted := decryptField(fieldAESKey, r.Phone)
+	phoneToStore := r.Phone
+	if fieldAESKey != nil {
+		if enc, err := encryptField(fieldAESKey, phoneDecrypted); err == nil {
+			phoneToStore = enc
+		}
+	}
+	phoneHash := hashIndex(fieldPepperKey, phoneDecrypted)
+
 	e := &userinfo{
 		Name:     r.Name,
-		Phone:    r.Phone,
+		Phone:    phoneDecrypted,
 		Password: r.Password,
 		CallSign: r.CallSign,
 		Birthday: r.Birthday,
@@ -196,9 +218,10 @@ func addUserReg(ctx context.Context, u *reguser) error {
 		alarm_msg,		
 		create_time,
 		login_err_times,
-		update_time) 
+		update_time,
+		phone_hash) 
 	VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-		CURRENT_TIMESTAMP,0,CURRENT_TIMESTAMP)`
+		CURRENT_TIMESTAMP,0,CURRENT_TIMESTAMP,?)`
 
 	stmt, err := db.Prepare(query)
 
@@ -210,8 +233,8 @@ func addUserReg(ctx context.Context, u *reguser) error {
 
 	e.Avatar = conf.WeiXin.AvatarURL
 
-	res, err := stmt.Exec(e.PID, e.Name, e.Phone, e.Sex, e.CallSign, e.Gird, e.Address, e.Birthday, e.Introduction, e.NickName, e.OpenID, e.LastLoginIP, e.LastLoginTime,
-		e.Avatar, e.Status, e.Password, "ham", e.AlarmMsg)
+	res, err := stmt.Exec(e.PID, e.Name, phoneToStore, e.Sex, e.CallSign, e.Gird, e.Address, e.Birthday, e.Introduction, e.NickName, e.OpenID, e.LastLoginIP, e.LastLoginTime,
+		e.Avatar, e.Status, e.Password, "ham", e.AlarmMsg, phoneHash)
 
 	if err != nil {
 		log.Println("add user failed 2, ", err, '\n', query)
@@ -281,19 +304,32 @@ func updateRegUserCertPath(opCertPath, licensePath, callsign string) error {
 
 func updateRegUser(e *reguser) error {
 
+	phoneToStore := e.Phone
+	if fieldAESKey != nil {
+		if enc, err := encryptField(fieldAESKey, e.Phone); err == nil {
+			phoneToStore = enc
+		}
+	}
+	phoneHash := hashIndex(fieldPepperKey, e.Phone)
+
 	_, err := db.Exec(`update registers set 
 	name=?,phone=?,sex=?,callsign=?,	
 	address=?,birthday=?,mail=?,
 	status=?,note=?,
-	update_time=CURRENT_TIMESTAMP
+	update_time=CURRENT_TIMESTAMP,
+	phone_hash=?
 	where id=?`,
-		e.Name, e.Phone, e.Sex, e.CallSign, e.Address, e.Birthday, e.Mail, e.Status, e.Note, e.ID)
+		e.Name, phoneToStore, e.Sex, e.CallSign, e.Address, e.Birthday, e.Mail, e.Status, e.Note, phoneHash, e.ID)
 	if err != nil {
 		log.Println("update reg user failed, ", err)
 		return err
 	}
 
 	if e.Password != "" {
+
+		if err := validatePassword(e.Password, e.CallSign, e.Phone); err != nil {
+			return err
+		}
 
 		password, err := bcrypt.GenerateFromPassword([]byte(e.Password), bcrypt.DefaultCost)
 
@@ -323,13 +359,21 @@ func deleteRegUser(e *reguser) {
 
 }
 
-// 保存文件到指定路径
+// 保存文件到指定路径（若配置了执照加密密钥，则自动执行 AES-256-GCM 加密落盘）
 func saveFile(file io.Reader, path string) error {
-	out, err := os.Create(path)
+	rawBytes, err := io.ReadAll(file)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
-	_, err = io.Copy(out, file)
-	return err
+
+	dataToWrite := rawBytes
+	if len(licenseAESKey) == 32 {
+		encrypted, err := encryptAESGCM(licenseAESKey, rawBytes)
+		if err != nil {
+			return fmt.Errorf("encrypt license file failed: %w", err)
+		}
+		dataToWrite = encrypted
+	}
+
+	return os.WriteFile(path, dataToWrite, 0644)
 }

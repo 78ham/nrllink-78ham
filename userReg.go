@@ -9,9 +9,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
+
+var regCallsignRegex = regexp.MustCompile(`^[A-Za-z0-9-]{3,16}$`)
 
 func (j *jsonapi) httpRegisterList(w http.ResponseWriter, req *http.Request) {
 	sethttphead(w)
@@ -104,6 +107,23 @@ func (j *jsonapi) httpRegisterImage(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// 若文件为 AES-256-GCM 加密存储，执行解密
+	if isEncryptedLicense(imageData) {
+		if len(licenseAESKey) == 32 {
+			decrypted, err := decryptAESGCM(licenseAESKey, imageData)
+			if err != nil {
+				log.Println("decrypt license file failed:", err)
+				http.Error(w, "Failed to decrypt license file", http.StatusInternalServerError)
+				return
+			}
+			imageData = decrypted
+		} else {
+			log.Println("encrypted license detected but LicenseEncKey not configured")
+			http.Error(w, "License encryption key not configured", http.StatusInternalServerError)
+			return
+		}
+	}
+
 	// 将二进制数据转换为 Base64 编码
 	base64Data := base64.StdEncoding.EncodeToString(imageData)
 
@@ -142,16 +162,28 @@ func (j *jsonapi) httpRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 获取用户注册信息
-	callsign := r.FormValue("callsign")
-	name := r.FormValue("name")
-	phone := r.FormValue("phone")
-	address := r.FormValue("address")
-	mail := r.FormValue("mail")
+	callsign := strings.ToUpper(strings.TrimSpace(r.FormValue("callsign")))
+	name := strings.TrimSpace(r.FormValue("name"))
+	phone := strings.TrimSpace(r.FormValue("phone"))
+	address := strings.TrimSpace(r.FormValue("address"))
+	mail := strings.TrimSpace(r.FormValue("mail"))
 	password := r.FormValue("password")
 
 	// 检查必填字段
 	if callsign == "" || name == "" || phone == "" || password == "" {
 		w.Write(ResParmErr)
+		return
+	}
+
+	// 校验呼号格式，阻断路径穿越和特殊字符
+	if !regCallsignRegex.MatchString(callsign) {
+		writeJSONResponseMessage(w, "呼号格式不合法，仅允许3-16位字母、数字或连字符", 20001)
+		return
+	}
+
+	// 强制校验注册密码复杂度与手机号/呼号相似度
+	if err := validatePassword(password, callsign, phone); err != nil {
+		writeJSONResponseMessage(w, err.Error(), 20001)
 		return
 	}
 
@@ -190,10 +222,15 @@ func (j *jsonapi) httpRegister(w http.ResponseWriter, r *http.Request) {
 
 	// 处理上传的电台执照文件
 	licenseFile, licenseHeader, err := r.FormFile("license")
-	if err == nil {
-		log.Println("注册信息licenseFile：", err)
+	if err == nil && licenseHeader != nil {
 		defer licenseFile.Close()
-		licensePath = filepath.Join(uploadDir, callsign+"_license"+filepath.Ext(licenseHeader.Filename))
+		ext := strings.ToLower(filepath.Ext(licenseHeader.Filename))
+		allowedExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true}
+		if !allowedExts[ext] {
+			writeJSONResponseMessage(w, "执照图片格式仅支持 jpg/jpeg/png", 20001)
+			return
+		}
+		licensePath = filepath.Join(uploadDir, callsign+"_license"+ext)
 		if err := saveFile(licenseFile, licensePath); err != nil {
 			log.Println("注册信息licensePath：", err)
 			w.Write(ResOpErr)

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -1115,6 +1116,39 @@ func (c *wsCallClient) audioLoop() {
 	}
 }
 
+var wsTicketStore sync.Map // key ticket (string), value wsTicket
+
+type wsTicket struct {
+	username string
+	expireAt time.Time
+}
+
+func createWSTicket(username string) string {
+	ticket := fmt.Sprintf("%x%x", time.Now().UnixNano(), RandString(16))
+	wsTicketStore.Store(ticket, wsTicket{username: username, expireAt: time.Now().Add(30 * time.Second)})
+	return ticket
+}
+
+func consumeWSTicket(ticket string) string {
+	if val, ok := wsTicketStore.LoadAndDelete(ticket); ok {
+		item := val.(wsTicket)
+		if time.Now().Before(item.expireAt) {
+			return item.username
+		}
+	}
+	return ""
+}
+
+func (j *jsonapi) httpGetWSTicket(w http.ResponseWriter, req *http.Request) {
+	sethttphead(w)
+	u, err := checktoken(w, req)
+	if err != nil {
+		return
+	}
+	ticket := createWSTicket(u.CallSign)
+	writeJSONResponseItem(w, map[string]string{"ticket": ticket})
+}
+
 func (j *jsonapi) wsCallStream(ws *websocket.Conn) {
 	req := ws.Request()
 	if req == nil {
@@ -1122,16 +1156,42 @@ func (j *jsonapi) wsCallStream(ws *websocket.Conn) {
 		return
 	}
 
-	tokenString := req.URL.Query().Get("token")
-	var user *userinfo
-	if tokenString != "" {
-		token, err := ValidateToken(tokenString)
-		if err != nil {
-			ws.Close()
-			return
-		}
+	var username string
+	// 优先消费短效单次 Ticket，彻底避免长效 Token 进 Nginx access.log
+	if ticket := req.URL.Query().Get("ticket"); ticket != "" {
+		username = consumeWSTicket(ticket)
+	}
 
-		user, err = getUserCached(token.Username)
+	if username == "" && ws.Config() != nil {
+		// 其次从 Sec-WebSocket-Protocol 中解析 token
+		for _, proto := range ws.Config().Protocol {
+			if strings.HasPrefix(proto, "token.") {
+				tok := strings.TrimPrefix(proto, "token.")
+				if claims, err := ValidateToken(tok); err == nil {
+					username = claims.Username
+					break
+				}
+			}
+		}
+	}
+
+	if username == "" {
+		// 兜底向后兼容旧客户端 URL query 传 token
+		tokenString := req.URL.Query().Get("token")
+		if tokenString != "" {
+			token, err := ValidateToken(tokenString)
+			if err != nil {
+				ws.Close()
+				return
+			}
+			username = token.Username
+		}
+	}
+
+	var user *userinfo
+	if username != "" {
+		var err error
+		user, err = getUserCached(username)
 		if err != nil || user.Status != 1 {
 			log.Println("websocket user lookup failed:", err)
 			ws.Close()

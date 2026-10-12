@@ -84,8 +84,13 @@ func (j *jsonapi) httpUserAllList(w http.ResponseWriter, req *http.Request) {
 func (j *jsonapi) httpUserList(w http.ResponseWriter, req *http.Request) {
 	sethttphead(w)
 
-	_, err := checktoken(w, req)
+	u, err := checktoken(w, req)
 	if err != nil {
+		return
+	}
+
+	if !checkrole(u, []string{"admin", "ham"}) {
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"当前用户没有权限查看此列表"}}`))
 		return
 	}
 
@@ -128,8 +133,13 @@ func (j *jsonapi) httpUserList(w http.ResponseWriter, req *http.Request) {
 func (j *jsonapi) httpUserListbyRole(w http.ResponseWriter, req *http.Request) {
 	sethttphead(w)
 
-	_, err := checktoken(w, req)
+	u, err := checktoken(w, req)
 	if err != nil {
+		return
+	}
+
+	if !checkrole(u, []string{"admin", "ham"}) {
+		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"当前用户没有权限查看此列表"}}`))
 		return
 	}
 
@@ -739,18 +749,44 @@ func (j *jsonapi) httpUserLogin(w http.ResponseWriter, req *http.Request) {
 	}
 
 	if v, ok := loginCheck(stb.Password, stb.Username, req.RemoteAddr); ok {
-		s, err := GenerateToken(stb.Username, v)
+		user, err := getuser(stb.Username)
+		if err == nil && user != nil && user.TOTPEnabled == 1 {
+			// 该用户已开启两步验证，下发短效 Ticket 进行二次验证
+			ticket := createTOTPLoginTicket(user, v)
+			type totpData struct {
+				Require2FA bool   `json:"require_2fa"`
+				TOTPTicket string `json:"totp_ticket"`
+			}
+			res := &struct {
+				Code    int      `json:"code"`
+				Data    totpData `json:"data"`
+				Message string   `json:"message"`
+			}{
+				Code:    20000,
+				Data:    totpData{Require2FA: true, TOTPTicket: ticket},
+				Message: "需要输入两步验证动态码",
+			}
+			rescode, _ := jsonextra.Marshal(res)
+			w.Write(rescode)
+			return
+		}
+
+		tokenVersion := 1
+		mustChangePwd := false
+		defaultAdmin := false
+		if user != nil {
+			if user.TokenVersion > 0 {
+				tokenVersion = user.TokenVersion
+			}
+			mustChangePwd = user.MustChangePwd == 1
+			defaultAdmin = isDefaultAdmin(user.ID)
+		}
+
+		s, err := GenerateToken(stb.Username, v, tokenVersion)
 		if err != nil {
 			log.Println("token generate err:", err)
 			w.Write(ResTokenErr)
 			return
-		}
-
-		mustChangePwd := false
-		defaultAdmin := false
-		if user, err := getuser(stb.Username); err == nil {
-			mustChangePwd = user.MustChangePwd == 1
-			defaultAdmin = isDefaultAdmin(user.ID)
 		}
 
 		type loginData struct {
@@ -858,6 +894,7 @@ func (j *jsonapi) httpoplogout(w http.ResponseWriter, req *http.Request) {
 	if stb.SSID == 100 {
 		offlineDevice(getCallsignSSID(u.CallSign, 100))
 	}
+	revokeUserToken(u.ID, u.CallSign)
 
 	log.Println("logout:", result, string(result))
 
@@ -892,6 +929,12 @@ func checktoken(w http.ResponseWriter, req *http.Request) (*userinfo, error) {
 	if emp.Status != 1 {
 		w.Write(ResAccountErr)
 		return nil, fmt.Errorf("账号已禁用")
+	}
+
+	// 检查令牌版本，若用户已修改密码或登出，旧令牌立即作废
+	if token.TokenVersion > 0 && emp.TokenVersion > 0 && token.TokenVersion != emp.TokenVersion {
+		w.Write(ResTokenErr)
+		return nil, fmt.Errorf("令牌已失效，请重新登录")
 	}
 
 	// 所有检查通过，返回员工信息指针和nil错误

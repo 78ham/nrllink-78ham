@@ -31,7 +31,9 @@ func initAllUserList() {
     nickname,
     pid,
 	last_login_ip,
-	expire_time
+	expire_time,
+	COALESCE(lock_until, 0),
+	COALESCE(token_version, 1)
 	FROM users where status=1`)
 
 	if err != nil {
@@ -51,13 +53,15 @@ func initAllUserList() {
 			&user.Birthday, &user.Sex, &user.Avatar, &user.Address,
 			&roles, &user.Introduction, &user.AlarmMsg,
 			&user.Status, &user.UpdateTime, &user.LastLoginTime, &user.LoginErrTimes,
-			&user.CreateTime, &user.OpenID, &user.NickName, &user.PID, &user.LastLoginIP, &user.ExpireTime)
+			&user.CreateTime, &user.OpenID, &user.NickName, &user.PID, &user.LastLoginIP, &user.ExpireTime,
+			&user.LockUntil, &user.TokenVersion)
 		if err != nil {
 			log.Println("query  all user rows err:", err)
 			continue
 		}
 
 		user.Roles = strings.Split(roles, ",")
+		user.Phone = decryptField(fieldAESKey, user.Phone)
 
 		user.userinit()
 

@@ -134,6 +134,9 @@ func execDDL() {
 			"mdcid"	TEXT DEFAULT '',
 			"dmrid"	INTEGER DEFAULT 0,
 			"must_change_pwd"	INTEGER DEFAULT 0,
+			"lock_until"	INTEGER DEFAULT 0,
+			"token_version"	INTEGER DEFAULT 1,
+			"phone_hash"	TEXT DEFAULT '',
 			PRIMARY KEY("id" AUTOINCREMENT)
 		)`,
 		`CREATE TABLE IF NOT EXISTS "devices" (
@@ -248,6 +251,7 @@ func execDDL() {
 			"sex"	INTEGER,
 			"op_cert_path"	TEXT,
 			"license_path"	TEXT,
+			"phone_hash"	TEXT DEFAULT '',
 			"status"	INTEGER DEFAULT 1,
 			"create_time"	TEXT,
 			"update_time"	TEXT,
@@ -634,7 +638,7 @@ func seedAdmin() bool {
 	return true
 }
 
-func validatePassword(pw string) error {
+func validatePassword(pw string, callsign string, phone string) error {
 	if len(pw) < 8 {
 		return fmt.Errorf("密码长度不能少于8位")
 	}
@@ -666,11 +670,26 @@ func validatePassword(pw string) error {
 		return fmt.Errorf("密码必须包含至少一个特殊字符")
 	}
 
+	pwLower := strings.ToLower(pw)
 	blacklist := []string{"nrl1234", "nrl888", "admin123", "password", "12345678"}
 	for _, b := range blacklist {
-		if strings.Contains(strings.ToLower(pw), b) {
+		if strings.Contains(pwLower, b) {
 			return fmt.Errorf("密码包含不安全词汇")
 		}
+	}
+
+	// 呼号检测（不区分大小写）
+	cleanCallsign := strings.ToLower(strings.TrimSpace(callsign))
+	if cleanCallsign != "" && strings.Contains(pwLower, cleanCallsign) {
+		return fmt.Errorf("密码不能包含呼号")
+	}
+
+	// 手机号检测（精确匹配完整11位手机号码，忽略空格与横线）
+	cleanPhone := strings.TrimSpace(phone)
+	cleanPhone = strings.ReplaceAll(cleanPhone, " ", "")
+	cleanPhone = strings.ReplaceAll(cleanPhone, "-", "")
+	if len(cleanPhone) == 11 && strings.Contains(pw, cleanPhone) {
+		return fmt.Errorf("密码不能包含完整手机号码")
 	}
 
 	return nil

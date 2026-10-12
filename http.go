@@ -188,7 +188,16 @@ func writeJSONEnvelope(w http.ResponseWriter, code int, data interface{}) {
 
 func readRequestBodyRaw(req *http.Request) ([]byte, error) {
 	defer req.Body.Close()
-	return io.ReadAll(req.Body)
+	// 限制普通请求体最多 1MB，防 OOM 内存耗尽攻击
+	limitReader := io.LimitReader(req.Body, 1<<20+1)
+	body, err := io.ReadAll(limitReader)
+	if err != nil {
+		return nil, err
+	}
+	if len(body) > 1<<20 {
+		return nil, fmt.Errorf("request body exceeds 1MB limit")
+	}
+	return body, nil
 }
 
 func readRequestBody(w http.ResponseWriter, req *http.Request) ([]byte, bool) {
@@ -235,6 +244,9 @@ func writeJSONResponseOpError(w http.ResponseWriter) {
 }
 
 func allowWebsocketHandshake(config *websocket.Config, req *http.Request) error {
+	if len(config.Protocol) > 0 {
+		config.Protocol = config.Protocol[:1]
+	}
 	return nil
 }
 
@@ -254,6 +266,8 @@ func (j *jsonapi) msghttp() {
 	registerRoute("/weixin/wxmsg", j.httpgetWeiXinMsg)          //查询微信用户发过来的消息
 	registerRoute("/api/getwxmsg", j.httpGetWeiXinMsgContent)
 	registerRoute("/api/weixin/wxlogin/teacher", j.httpMPuserLogin) //小程序登录
+
+	registerRoute("/auth/ws-ticket", j.httpGetWSTicket)
 
 	registerRoute("/platform/info", j.httpplatforminfo)
 	registerRoute("/platform/list", j.httpplatformList)
@@ -351,6 +365,7 @@ func (j *jsonapi) msghttp() {
 	registerRoute("/roles/updateroutes", j.httpSetRoutes)
 
 	registerRoute("/operatorlog/list", j.httpOperatorLogList)
+	registerRoute("/admin/backup/database", j.httpAdminBackupDB)
 
 	// BM 网络管理与桥接后台化接口
 	registerRoute("/bm/network/list", j.httpBMNetworkList)
@@ -375,6 +390,7 @@ func (j *jsonapi) msghttp() {
 	api("/auth/login", j.httpUserLogin)
 	api("/auth/me", j.httpUserInfo)
 	api("/auth/logout", j.httpoplogout)
+	api("/auth/ws-ticket", j.httpGetWSTicket)
 	api("/devices", j.httpDeviceList)
 	api("/devices/db", j.httpDevicesList)
 	api("/devices/my", j.httpMyDeviceList)
@@ -393,6 +409,21 @@ func (j *jsonapi) msghttp() {
 	api("/platform/info", j.httpplatforminfo)
 	api("/platform/site-settings", j.httpSiteSettings)
 	api("/platform/site-settings/update", j.httpSiteSettingsUpdate)
+	api("/admin/backup/database", j.httpAdminBackupDB)
+
+	// TOTP 2FA 接口
+	api("/user/totp/setup", j.httpUserTOTPSetup)
+	api("/user/totp/verify", j.httpUserTOTPVerify)
+	api("/user/totp/disable", j.httpUserTOTPDisable)
+	api("/auth/totp/login", j.httpAuthTOTPLogin)
+
+	// WebAuthn Passkey 接口
+	api("/webauthn/register/begin", j.httpWebAuthnRegisterBegin)
+	api("/webauthn/register/finish", j.httpWebAuthnRegisterFinish)
+	api("/webauthn/login/begin", j.httpWebAuthnLoginBegin)
+	api("/webauthn/login/finish", j.httpWebAuthnLoginFinish)
+	api("/webauthn/credentials", j.httpWebAuthnListCredentials)
+	api("/webauthn/credentials/delete", j.httpWebAuthnDeleteCredential)
 
 	// 首页 CMS 别名层：前端调用的路径带 /api 与 /api/admin 前缀，
 	// 这里一并注册，避免前台首页公告 / 板块 / 图片接口 404。

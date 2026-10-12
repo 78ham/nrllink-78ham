@@ -22,7 +22,7 @@ type userinfo struct {
 	DMRID    string `db:"dmrid" json:"dmrid"`
 	Gird     string `db:"gird" json:"gird"`
 	Phone    string `db:"phone" json:"phone"`
-	Password string `db:"password" json:"password"`
+	Password string `db:"password" json:"-"`
 	//	JobTime  string `db:"job_time" json:"job_time"`
 	Birthday string `db:"birthday" json:"birthday"`
 	Sex      int    `db:"sex" json:"sex"`
@@ -51,6 +51,10 @@ type userinfo struct {
 	NickName      string        `json:"nickname" db:"nickname"`
 	OpenID        string        `json:"openid" db:"openid"`
 	MustChangePwd int           `json:"must_change_pwd" db:"must_change_pwd"`
+	LockUntil     int64         `json:"lock_until" db:"lock_until"`
+	TokenVersion  int           `json:"token_version" db:"token_version"`
+	TOTPSecret    string        `json:"-" db:"totp_secret"`
+	TOTPEnabled   int           `json:"totp_enabled" db:"totp_enabled"`
 	TalkDuration  time.Duration `json:"talk_duration"`
 	TalkTimes     int           `json:"talk_times"`
 }
@@ -177,7 +181,8 @@ func selectuser(w string, args []interface{}, p string, sort string) ([]userinfo
 	 callsign,gird,birthday,mdcid,dmrid,
 	 sex,nickname,openid,avatar,address, status,
 	 last_login_time, login_err_times, last_login_ip,
-	 alarm_msg,roles,create_time,update_time,expire_time FROM users  %v  %v  %v  `, w, sort, p)
+	 alarm_msg,roles,create_time,update_time,expire_time,
+	 COALESCE(lock_until, 0), COALESCE(token_version, 1) FROM users  %v  %v  %v  `, w, sort, p)
 
 	//fmt.Println(query)
 
@@ -197,12 +202,14 @@ func selectuser(w string, args []interface{}, p string, sort string) ([]userinfo
 			&r.Sex, &r.NickName, &r.OpenID, &r.Avatar, &r.Address, &r.Status,
 			&r.LastLoginTime, &r.LoginErrTimes, &r.LastLoginIP,
 			&r.AlarmMsg, &roles, &r.CreateTime, &r.UpdateTime, &r.ExpireTime,
+			&r.LockUntil, &r.TokenVersion,
 		)
 		if err != nil {
 			log.Println("getuser by username err :", err, "\n", query)
 			continue
 		}
 		r.Roles = strings.Split(roles, ",")
+		r.Phone = decryptField(fieldAESKey, r.Phone)
 		emp = append(emp, r)
 	}
 
@@ -233,14 +240,19 @@ func getuser(username string) (*userinfo, error) {
 	callsign,gird,birthday,mdcid,dmrid,
 	sex,nickname,openid,avatar,address, status,
 	last_login_time, login_err_times, last_login_ip,
-	alarm_msg,roles,create_time,update_time,expire_time,must_change_pwd FROM users where phone=? or callsign=? `
+	alarm_msg,roles,create_time,update_time,expire_time,must_change_pwd,
+	COALESCE(lock_until, 0), COALESCE(token_version, 1),
+	COALESCE(totp_secret, ''), COALESCE(totp_enabled, 0) FROM users where phone_hash=? or phone=? or callsign=? `
 
-	row := db.QueryRow(query, username, username)
+	phoneHash := hashIndex(fieldPepperKey, username)
+	row := db.QueryRow(query, phoneHash, username, username)
 	err := row.Scan(&r.ID, &r.PID, &r.Name, &r.Phone,
 		&r.CallSign, &r.Gird, &r.Birthday, &r.MDCID, &r.DMRID,
 		&r.Sex, &r.NickName, &r.OpenID, &r.Avatar, &r.Address, &r.Status,
 		&r.LastLoginTime, &r.LoginErrTimes, &r.LastLoginIP,
-		&r.AlarmMsg, &roles, &r.CreateTime, &r.UpdateTime, &r.ExpireTime, &r.MustChangePwd)
+		&r.AlarmMsg, &roles, &r.CreateTime, &r.UpdateTime, &r.ExpireTime, &r.MustChangePwd,
+		&r.LockUntil, &r.TokenVersion,
+		&r.TOTPSecret, &r.TOTPEnabled)
 	if err != nil {
 		// ErrNoRows 是正常情况（用户不存在），不记录错误日志
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -250,9 +262,7 @@ func getuser(username string) (*userinfo, error) {
 	}
 
 	r.Roles = strings.Split(roles, ",")
-
-	// r.userinit()
-	// userlist.Store(r.CallSign, *r)
+	r.Phone = decryptField(fieldAESKey, r.Phone)
 
 	return r, nil
 }
@@ -301,20 +311,25 @@ func getuserByID(id int) (*userinfo, error) {
 	callsign,gird,birthday,mdcid,dmrid,
 	sex,nickname,openid,avatar,address, status,
 	last_login_time, login_err_times, last_login_ip,
-	alarm_msg,roles,create_time,update_time,expire_time,must_change_pwd FROM users where id=? `
+	alarm_msg,roles,create_time,update_time,expire_time,must_change_pwd,
+	COALESCE(lock_until, 0), COALESCE(token_version, 1),
+	COALESCE(totp_secret, ''), COALESCE(totp_enabled, 0) FROM users where id=? `
 
 	row := db.QueryRow(query, id)
 	err := row.Scan(&r.ID, &r.PID, &r.Name, &r.Phone,
 		&r.CallSign, &r.Gird, &r.Birthday, &r.MDCID, &r.DMRID,
 		&r.Sex, &r.NickName, &r.OpenID, &r.Avatar, &r.Address, &r.Status,
 		&r.LastLoginTime, &r.LoginErrTimes, &r.LastLoginIP,
-		&r.AlarmMsg, &roles, &r.CreateTime, &r.UpdateTime, &r.ExpireTime, &r.MustChangePwd)
+		&r.AlarmMsg, &roles, &r.CreateTime, &r.UpdateTime, &r.ExpireTime, &r.MustChangePwd,
+		&r.LockUntil, &r.TokenVersion,
+		&r.TOTPSecret, &r.TOTPEnabled)
 	if err != nil {
 		log.Println("getuser by id err :", err, "\n", query)
 		return nil, err
 	}
 
 	r.Roles = strings.Split(roles, ",")
+	r.Phone = decryptField(fieldAESKey, r.Phone)
 	return r, nil
 }
 
@@ -395,13 +410,15 @@ func loginCheck(password string, username string, ip string) ([]string, bool) {
 		Roles         []string `db:"roles"`
 		Status        int      `db:"status"`
 		LoginErrTimes int      `db:"login_err_times"`
+		LockUntil     int64    `db:"lock_until"`
 	}
 	r := &resault{}
 
 	var roles string
 
-	row := db.QueryRow("SELECT password ,login_err_times,status,roles FROM users where phone=? or callsign=?", username, username)
-	err := row.Scan(&r.Password, &r.LoginErrTimes, &r.Status, &roles)
+	phoneHash := hashIndex(fieldPepperKey, username)
+	row := db.QueryRow("SELECT password, login_err_times, status, roles, COALESCE(lock_until, 0) FROM users where phone_hash=? or phone=? or callsign=?", phoneHash, username, username)
+	err := row.Scan(&r.Password, &r.LoginErrTimes, &r.Status, &roles, &r.LockUntil)
 	if err != nil {
 		// 不打印 password：登录失败路径不能把明文密码写进日志
 		log.Println("login err:", err, "username:", username)
@@ -409,6 +426,19 @@ func loginCheck(password string, username string, ip string) ([]string, bool) {
 	}
 
 	r.Roles = strings.Split(roles, ",")
+
+	now := time.Now().Unix()
+	// 如果仍在锁定时间内，直接拒绝
+	if r.LockUntil > now {
+		return nil, false
+	}
+
+	// 如果锁定窗口已过，自动解除锁定并重置计数
+	if r.LockUntil > 0 && r.LockUntil <= now {
+		r.LoginErrTimes = 0
+		r.LockUntil = 0
+		_, _ = db.Exec("update users set login_err_times=0, lock_until=0 where phone_hash=? or phone=? or callsign=?", phoneHash, username, username)
+	}
 
 	// 账号已锁定时直接拒绝，避免每次请求都执行 bcrypt（CPU DoS 放大器）
 	if r.LoginErrTimes >= conf.Security.MaxLoginAttempts {
@@ -423,7 +453,7 @@ func loginCheck(password string, username string, ip string) ([]string, bool) {
 	}
 
 	if passwordOK {
-		_, err = db.Exec(`update users set last_login_time=CURRENT_TIMESTAMP,last_login_ip=?,login_err_times=0 where phone=? or callsign=?`, ip, username, username)
+		_, err = db.Exec(`update users set last_login_time=CURRENT_TIMESTAMP,last_login_ip=?,login_err_times=0,lock_until=0 where phone_hash=? or phone=? or callsign=?`, ip, phoneHash, username, username)
 		if err != nil {
 			log.Println("update users last_login_time and last_login_ip  failed, ", err)
 			return nil, false
@@ -432,7 +462,16 @@ func loginCheck(password string, username string, ip string) ([]string, bool) {
 	}
 
 	if !passwordOK {
-		_, err = db.Exec(`update users set login_err_times = login_err_times + 1 where phone=? or callsign=?`, username, username)
+		newErrTimes := r.LoginErrTimes + 1
+		var lockUntil int64 = 0
+		if newErrTimes >= conf.Security.MaxLoginAttempts {
+			duration := conf.Security.LockoutDuration
+			if duration <= 0 {
+				duration = 900
+			}
+			lockUntil = now + int64(duration)
+		}
+		_, err = db.Exec(`update users set login_err_times=?, lock_until=? where phone_hash=? or phone=? or callsign=?`, newErrTimes, lockUntil, phoneHash, username, username)
 		if err != nil {
 			log.Println("update user login_err_times failed ,and password err ", err)
 			return nil, false
@@ -470,7 +509,7 @@ func loginCheck(password string, username string, ip string) ([]string, bool) {
 
 func addUser(e *userinfo) error {
 
-	if err := validatePassword(e.Password); err != nil {
+	if err := validatePassword(e.Password, e.CallSign, e.Phone); err != nil {
 		return err
 	}
 
@@ -484,12 +523,20 @@ func addUser(e *userinfo) error {
 
 	//	fmt.Println("user:", e)
 
+	phoneToStore := e.Phone
+	if fieldAESKey != nil {
+		if enc, err := encryptField(fieldAESKey, e.Phone); err == nil {
+			phoneToStore = enc
+		}
+	}
+	phoneHash := hashIndex(fieldPepperKey, e.Phone)
+
 	roles := strings.Join(e.Roles, ",")
 	query := `INSERT INTO users (pid,name,phone,sex,callsign,mdcid,dmrid,gird,address,birthday,introduction,nickname,openid,last_login_ip,last_login_time,
 		avatar,status,password,roles, alarm_msg,		
-		expire_time,create_time,login_err_times,update_time) 
+		expire_time,create_time,login_err_times,update_time,phone_hash) 
 	VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
-		CURRENT_TIMESTAMP,0,CURRENT_TIMESTAMP)`
+		CURRENT_TIMESTAMP,0,CURRENT_TIMESTAMP,?)`
 
 	stmt, err := db.Prepare(query)
 
@@ -502,8 +549,8 @@ func addUser(e *userinfo) error {
 	//	e.Avatar = "https://wpimg.wallstcn.com/f778738c-e4f8-4870-b634-56703b4acafe.gif"
 	e.Avatar = conf.WeiXin.AvatarURL
 
-	res, err := stmt.Exec(e.PID, e.Name, e.Phone, e.Sex, e.CallSign, e.MDCID, e.DMRID, e.Gird, e.Address, e.Birthday, e.Introduction, e.NickName, e.OpenID, e.LastLoginIP, e.LastLoginTime,
-		e.Avatar, e.Status, password, roles, e.AlarmMsg, e.ExpireTime)
+	res, err := stmt.Exec(e.PID, e.Name, phoneToStore, e.Sex, e.CallSign, e.MDCID, e.DMRID, e.Gird, e.Address, e.Birthday, e.Introduction, e.NickName, e.OpenID, e.LastLoginIP, e.LastLoginTime,
+		e.Avatar, e.Status, password, roles, e.AlarmMsg, e.ExpireTime, phoneHash)
 	// Named queries can use structs, so if you have an existing struct (i.e. person := &Person{}) that you have populated, you can pass it in as &person
 	//	tx.NamedExec("INSERT INTO person (first_name, last_name, email) VALUES (:first_name, :last_name, :email)", &Person{"Jane", "Citizen", "jane.citzen@example.com"})
 	if err != nil {
@@ -560,9 +607,17 @@ func updateUser(e *userinfo) error {
 
 	roles := strings.Join(e.Roles, ",")
 
+	phoneToStore := e.Phone
+	if fieldAESKey != nil {
+		if enc, err := encryptField(fieldAESKey, e.Phone); err == nil {
+			phoneToStore = enc
+		}
+	}
+	phoneHash := hashIndex(fieldPepperKey, e.Phone)
+
 	_, err := db.Exec(`update users set name=?,phone=?,sex=?,callsign=?,	mdcid=?,dmrid=?,gird=?,address=?,birthday=?,introduction=?,
-		avatar=?,status=?,alarm_msg=?,expire_time=?,update_time=CURRENT_TIMESTAMP,roles=?,pid=?  where id=?`,
-		e.Name, e.Phone, e.Sex, e.CallSign, e.MDCID, e.DMRID, e.Gird, e.Address, e.Birthday, e.Introduction, e.Avatar, e.Status, e.AlarmMsg, e.ExpireTime, roles, e.PID, e.ID)
+		avatar=?,status=?,alarm_msg=?,expire_time=?,update_time=CURRENT_TIMESTAMP,roles=?,pid=?,phone_hash=?  where id=?`,
+		e.Name, phoneToStore, e.Sex, e.CallSign, e.MDCID, e.DMRID, e.Gird, e.Address, e.Birthday, e.Introduction, e.Avatar, e.Status, e.AlarmMsg, e.ExpireTime, roles, e.PID, phoneHash, e.ID)
 	if err != nil {
 		log.Println("update user failed, ", err)
 		return err
@@ -645,21 +700,28 @@ func updateweixininfo(e wxUserInfo, studentid int) error {
 func updateUserPassword(id int, password string) error {
 
 	if password != "" {
-		if err := validatePassword(password); err != nil {
+		u, _ := getuserByID(id)
+		var callsign, phone string
+		if u != nil {
+			callsign = u.CallSign
+			phone = u.Phone
+		}
+		if err := validatePassword(password, callsign, phone); err != nil {
 			return err
 		}
 
-		password, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 
 		if err != nil {
 			return err
 		}
 		//	fmt.Println("password:", e.Password, len(e.Password))
-		_, err = db.Exec("update users set password=?  where id=?", password, id)
+		_, err = db.Exec("update users set password=?  where id=?", passwordHash, id)
 		if err != nil {
 			log.Println("update user password failed, ", err)
 			return errors.New("passord update err")
 		}
+		revokeUserToken(id, callsign)
 
 	}
 	return nil
@@ -674,7 +736,13 @@ func updateUserProfile(id int, dmrid string, mdcid string, avatar string, passwo
 	}
 
 	if password != "" {
-		if err := validatePassword(password); err != nil {
+		u, _ := getuserByID(id)
+		var callsign, phone string
+		if u != nil {
+			callsign = u.CallSign
+			phone = u.Phone
+		}
+		if err := validatePassword(password, callsign, phone); err != nil {
 			return err
 		}
 		passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -687,6 +755,7 @@ func updateUserProfile(id int, dmrid string, mdcid string, avatar string, passwo
 			log.Println("update user profile password failed, ", err)
 			return errors.New("passord update err")
 		}
+		revokeUserToken(id, callsign)
 	}
 
 	u, err := getuserByID(id)
@@ -718,4 +787,16 @@ func updateUserProfile(id int, dmrid string, mdcid string, avatar string, passwo
 	}
 
 	return nil
+}
+
+func revokeUserToken(id int, callsign string) {
+	_, err := db.Exec("UPDATE users SET token_version = COALESCE(token_version, 1) + 1 WHERE id=?", id)
+	if err != nil {
+		log.Println("revokeUserToken db update failed:", err)
+	}
+	if callsign != "" {
+		if v, ok := userlist.Load(strings.ToUpper(callsign)); ok {
+			v.(*userinfo).TokenVersion++
+		}
+	}
 }
