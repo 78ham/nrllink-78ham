@@ -11,7 +11,7 @@ type BMNetwork struct {
 	Name              string `json:"name" db:"name"`
 	ServerAddress     string `json:"server_address" db:"server_address"`
 	ServerPort        int    `json:"server_port" db:"server_port"`
-	Password          string `json:"password" db:"password"`
+	Password          string `json:"password,omitempty" db:"password"`
 	Callsign          string `json:"callsign" db:"callsign"`
 	DMRID             int    `json:"dmrid" db:"dmrid"`
 	DefaultTG         int    `json:"default_tg" db:"default_tg"`
@@ -85,17 +85,17 @@ func initBMNetworkTables() {
 }
 
 func getBMNetworkList() ([]BMNetwork, error) {
-	rows, err := db.Query("SELECT id, name, server_address, server_port, password, callsign, dmrid, default_tg, timeslot, heartbeat_interval, status, note, create_time, update_time FROM bm_networks ORDER BY id DESC")
+	rows, err := db.Query("SELECT id, name, server_address, server_port, callsign, dmrid, default_tg, timeslot, heartbeat_interval, status, note, create_time, update_time FROM bm_networks ORDER BY id DESC")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var list []BMNetwork
+	list := []BMNetwork{}
 	for rows.Next() {
 		var n BMNetwork
 		if err := rows.Scan(
-			&n.ID, &n.Name, &n.ServerAddress, &n.ServerPort, &n.Password,
+			&n.ID, &n.Name, &n.ServerAddress, &n.ServerPort,
 			&n.Callsign, &n.DMRID, &n.DefaultTG, &n.Timeslot, &n.HeartbeatInterval,
 			&n.Status, &n.Note, &n.CreateTime, &n.UpdateTime,
 		); err != nil {
@@ -103,7 +103,7 @@ func getBMNetworkList() ([]BMNetwork, error) {
 		}
 		list = append(list, n)
 	}
-	return list, nil
+	return list, rows.Err()
 }
 
 func getBMNetworkByID(id int) (*BMNetwork, error) {
@@ -133,13 +133,13 @@ func insertBMNetwork(n *BMNetwork) (int64, error) {
 	return res.LastInsertId()
 }
 
-func updateBMNetwork(n *BMNetwork) error {
+func updateBMNetwork(n *BMNetwork, password *string) error {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	_, err := db.Exec(`UPDATE bm_networks SET
-		name=?, server_address=?, server_port=?, password=?, callsign=?, dmrid=?,
+		name=?, server_address=?, server_port=?, password=COALESCE(?, password), callsign=?, dmrid=?,
 		default_tg=?, timeslot=?, heartbeat_interval=?, status=?, note=?, update_time=?
 		WHERE id=?`,
-		n.Name, n.ServerAddress, n.ServerPort, n.Password, n.Callsign, n.DMRID,
+		n.Name, n.ServerAddress, n.ServerPort, password, n.Callsign, n.DMRID,
 		n.DefaultTG, n.Timeslot, n.HeartbeatInterval, n.Status, n.Note, now, n.ID,
 	)
 	return err

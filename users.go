@@ -18,6 +18,12 @@ import (
 // 	Scope       string `json:"scope"`
 // }
 
+// 请求单独接收密码，避免明文进入用户缓存或 JSON 响应。
+type userWriteRequest struct {
+	userinfo
+	Password string `json:"password"`
+}
+
 type loginreq struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -284,7 +290,7 @@ func (j *jsonapi) httpUpdateUser(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	stb := &userinfo{}
+	stb := &userWriteRequest{}
 	err = jsonextra.Unmarshal(result, &stb)
 
 	if err != nil {
@@ -317,7 +323,7 @@ func (j *jsonapi) httpUpdateUser(w http.ResponseWriter, req *http.Request) {
 
 	// 加固：不能禁用或降级系统中最后一个管理员。
 	if target, err := getuserByID(stb.ID); err == nil && checkrole(target, []string{"admin"}) {
-		if !checkrole(stb, []string{"admin"}) || stb.Status != 1 {
+		if !checkrole(&stb.userinfo, []string{"admin"}) || stb.Status != 1 {
 			var otherAdmins int
 			if err := db.QueryRow("SELECT count(*) FROM users WHERE roles LIKE '%admin%' AND id<>?", stb.ID).Scan(&otherAdmins); err != nil || otherAdmins == 0 {
 				w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"不能禁用或降级系统中最后一个管理员"}}`))
@@ -327,7 +333,7 @@ func (j *jsonapi) httpUpdateUser(w http.ResponseWriter, req *http.Request) {
 	}
 
 	//stb.Area = u.Area
-	if err := updateUser(stb); err != nil {
+	if err := updateUser(&stb.userinfo, stb.Password); err != nil {
 		log.Println("update user failed:", err)
 		msg := "员工信息更新失败：" + err.Error()
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -361,34 +367,34 @@ func (j *jsonapi) httpUpdateUserProfile(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	stb := &userinfo{}
+	stb := &userWriteRequest{}
 	err = jsonextra.Unmarshal(result, &stb)
 	if err != nil {
 		log.Println("update user profile err :", err)
-		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"账号操作失败"}}`))
+		w.Write([]byte(`{"code":20001,"data":{"isok":1,"message":"账号操作失败"}}`))
 		return
 	}
 
 	if u.ID != stb.ID {
-		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"当前用户没有权限设置此参数"}}`))
+		w.Write([]byte(`{"code":20001,"data":{"isok":1,"message":"当前用户没有权限设置此参数"}}`))
 		return
 	}
 
 	stb.MDCID = strings.ToUpper(strings.TrimSpace(stb.MDCID))
 	if stb.MDCID != "" && !isValidMDCID(stb.MDCID) {
-		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"MDC ID 必须是 4 位十六进制字符串"}}`))
+		w.Write([]byte(`{"code":20001,"data":{"isok":1,"message":"MDC ID 必须是 4 位十六进制字符串"}}`))
 		return
 	}
 
 	stb.DMRID = strings.TrimSpace(stb.DMRID)
 	if !isValidDMRID(stb.DMRID) {
-		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"DMR ID 必须是 0 到 4294967295 之间的整数"}}`))
+		w.Write([]byte(`{"code":20001,"data":{"isok":1,"message":"DMR ID 必须是 0 到 4294967295 之间的整数"}}`))
 		return
 	}
 
 	stb.Avatar = strings.TrimSpace(stb.Avatar)
-	if err := updateUserProfile(u.ID, stb.DMRID, stb.MDCID, stb.Avatar, stb.Password); err != nil {
-		w.Write([]byte(`{"code":20000,"data":{"message":"个人信息更新失败"}}`))
+	if err := updateUserProfile(u, stb.DMRID, stb.MDCID, stb.Avatar, stb.Password); err != nil {
+		writeJSONResponseError(w, "个人信息更新失败："+err.Error())
 		return
 	}
 
@@ -443,39 +449,22 @@ func (j *jsonapi) httpUpdateUserPassword(w http.ResponseWriter, req *http.Reques
 		return
 	}
 
-	result, ok := readRequestBody(w, req)
-	if !ok {
+	var payload struct {
+		Password string `json:"password"`
+	}
+	if !decodeRequestJSON(w, req, &payload) {
 		return
 	}
-
-	stb := &userinfo{}
-	err = jsonextra.Unmarshal(result, &stb)
-
-	if err != nil {
-		log.Println("update user  err :", err)
-		w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"账号操作失败"}}`))
+	if payload.Password == "" {
+		writeJSONResponseError(w, "请输入新密码")
 		return
 	}
-
-	// if checkrole(stb, []string{"admin"}) {
-	// 	w.Write([]byte("{"code":20000,"data":{"message":"内置账号，无法修改"}}"))
-	// 	return
-	// }
-
-	//stb.Area = u.Area
-	err = updateUserPassword(u.ID, stb.Password)
-
-	if err != nil {
-		log.Println("update user password err :", err)
-		w.Write([]byte(`{"code":20000,"data":{"message":"密码修改失败"}}`))
+	if err := saveUserFields(u.ID, "", nil, payload.Password, u.CallSign, u.Phone); err != nil {
+		writeJSONResponseError(w, "密码修改失败："+err.Error())
 		return
 	}
-
-	clearMustChangePwd(u.ID)
-	addOperatorLog(stb.String(), "修改密码成功", u)
-
-	w.Write([]byte(`{"code":20000,"data":{"message":"密码更新成功"}}`))
-
+	addOperatorLog(u.String(), "修改密码成功", u)
+	writeJSONResponseMessage(w, "密码更新成功", 20000)
 }
 
 func (j *jsonapi) httpAddUser(w http.ResponseWriter, req *http.Request) {
@@ -497,7 +486,7 @@ func (j *jsonapi) httpAddUser(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	stb := &userinfo{}
+	stb := &userWriteRequest{}
 	err = jsonextra.Unmarshal(result, &stb)
 
 	if err != nil {
@@ -506,7 +495,7 @@ func (j *jsonapi) httpAddUser(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	if err := addUser(stb); err != nil {
+	if err := addUser(&stb.userinfo, stb.Password); err != nil {
 		log.Println("add user failed:", err)
 		msg := "新增用户失败：" + err.Error()
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -654,8 +643,10 @@ func (j *jsonapi) httpRole(w http.ResponseWriter, req *http.Request) {
 			w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"角色添加操作失败"}}`))
 			return
 		}
-		//	stb.Key = stb.Name
-		addRole(stb)
+		if err := addRole(stb); err != nil {
+			writeJSONResponseError(w, "角色添加失败："+err.Error())
+			return
+		}
 
 		addOperatorLog(stb.String(), "增加角色", u)
 
@@ -676,13 +667,18 @@ func (j *jsonapi) httpRole(w http.ResponseWriter, req *http.Request) {
 			w.Write([]byte(`{"code":20000,"data":{"isok":1,"message":"角色修改操作失败"}}`))
 			return
 		}
-		updateRole(stb)
+		if err := updateRole(stb); err != nil {
+			writeJSONResponseError(w, "角色修改失败："+err.Error())
+			return
+		}
 		addOperatorLog(stb.String(), "修改角色", u)
 		w.Write([]byte(`{"code":20000,"data":{"isok":0,"message":"角色修改操作成功"}}`))
 
 	case "DELETE":
-		//fmt.Println("del role")
-		delRole(key)
+		if err := delRole(key); err != nil {
+			writeJSONResponseError(w, "角色删除失败："+err.Error())
+			return
+		}
 		addOperatorLog(key, "删除角色", u)
 		w.Write([]byte(`{"code":20000,"data":{"isok":0,"message":"角色删除操作成功"}}`))
 
@@ -880,21 +876,21 @@ func (j *jsonapi) httpoplogout(w http.ResponseWriter, req *http.Request) {
 	if !ok {
 		return
 	}
-	//fmt.Println("adminlogin result:", string(result))
-
+	// Web sends an empty POST; radio clients can also send their SSID.
 	stb := &query{}
-	err = jsonextra.Unmarshal(result, &stb)
-
-	if err != nil {
-		log.Println("logout  err :", err)
-		w.Write([]byte(`{"code":20000,"data":{"message":"退出登录错误"}}`))
-		return
+	if len(result) > 0 {
+		if err := jsonextra.Unmarshal(result, stb); err != nil {
+			writeJSONResponseParamError(w)
+			return
+		}
 	}
-
 	if stb.SSID == 100 {
 		offlineDevice(getCallsignSSID(u.CallSign, 100))
 	}
-	revokeUserToken(u.ID, u.CallSign)
+	if err := revokeUserToken(u.ID); err != nil {
+		writeJSONResponseOpError(w)
+		return
+	}
 
 	log.Println("logout:", result, string(result))
 

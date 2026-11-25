@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -22,7 +23,6 @@ type userinfo struct {
 	DMRID    string `db:"dmrid" json:"dmrid"`
 	Gird     string `db:"gird" json:"gird"`
 	Phone    string `db:"phone" json:"phone"`
-	Password string `db:"password" json:"-"`
 	//	JobTime  string `db:"job_time" json:"job_time"`
 	Birthday string `db:"birthday" json:"birthday"`
 	Sex      int    `db:"sex" json:"sex"`
@@ -138,39 +138,38 @@ func getRoleByKey(key string) *role {
 	return r
 }
 
-func addRole(r *role) {
-
-	//	fmt.Println("routes:", r)
-
-	_, err := db.Exec("insert into  roles (name_key,name,description,routes) VALUES (?,?,?,?)", r.NameKey, r.Name, r.Description, r.Routes)
+func addRole(r *role) error {
+	res, err := db.Exec("INSERT INTO roles (name_key,name,description,routes) VALUES (?,?,?,?)", r.NameKey, r.Name, r.Description, r.Routes)
 	if err != nil {
-		log.Println("add role failed, ", err)
-		return
+		return err
 	}
-
+	id, err := res.LastInsertId()
+	r.ID = int(id)
+	return err
 }
 
-func updateRole(r *role) {
-
-	_, err := db.Exec("update roles set name_key=?,name=?,description=?,routes=? where id=?", r.NameKey, r.Name, r.Description, r.Routes, r.ID)
-	if err != nil {
-		log.Println("exec update role failed, ", err)
-		return
-	}
-
+func updateRole(r *role) error {
+	res, err := db.Exec("UPDATE roles SET name_key=?,name=?,description=?,routes=? WHERE id=?", r.NameKey, r.Name, r.Description, r.Routes, r.ID)
+	return roleWriteResult(res, err)
 }
 
-func delRole(k string) {
-
-	if k == "admin" {
-		return
+func delRole(key string) error {
+	if key == "admin" {
+		return errors.New("不能删除内置管理员角色")
 	}
-	_, err := db.Exec("delete from  roles  where name_key=?", k)
+	res, err := db.Exec("DELETE FROM roles WHERE name_key=?", key)
+	return roleWriteResult(res, err)
+}
+
+func roleWriteResult(result sql.Result, err error) error {
 	if err != nil {
-		log.Println("exec del role failed, ", err)
-		return
+		return err
 	}
-
+	count, err := result.RowsAffected()
+	if err == nil && count == 0 {
+		return errors.New("指定的角色不存在")
+	}
+	return err
 }
 
 func selectuser(w string, args []interface{}, p string, sort string) ([]userinfo, int) {
@@ -228,42 +227,42 @@ func selectuser(w string, args []interface{}, p string, sort string) ([]userinfo
 
 }
 
+// 初始化和旧版本创建的账号可能缺少选填字段，统一按空值读取。
+const userRecordSelect = `SELECT id, COALESCE(pid,''), COALESCE(name,''), COALESCE(phone,''),
+	COALESCE(callsign,''), COALESCE(gird,''), COALESCE(birthday,''), COALESCE(mdcid,''), COALESCE(dmrid,''),
+	COALESCE(sex,0), COALESCE(nickname,''), COALESCE(openid,''), COALESCE(avatar,''), COALESCE(address,''), COALESCE(status,0),
+	COALESCE(last_login_time,''), COALESCE(login_err_times,0), COALESCE(last_login_ip,''),
+	COALESCE(alarm_msg,0), COALESCE(roles,''), COALESCE(create_time,''), COALESCE(update_time,''), COALESCE(expire_time,''),
+	COALESCE(must_change_pwd,0), COALESCE(lock_until,0), COALESCE(token_version,1),
+	COALESCE(totp_secret,''), COALESCE(totp_enabled,0), COALESCE(introduction,''), COALESCE(routes,'') FROM users`
+
 func getuser(username string) (*userinfo, error) {
-
-	r := &userinfo{}
-
-	var roles string
-
 	username = strings.ToUpper(username)
-
-	query := `SELECT id,pid,name,phone,
-	callsign,gird,birthday,mdcid,dmrid,
-	sex,nickname,openid,avatar,address, status,
-	last_login_time, login_err_times, last_login_ip,
-	alarm_msg,roles,create_time,update_time,expire_time,must_change_pwd,
-	COALESCE(lock_until, 0), COALESCE(token_version, 1),
-	COALESCE(totp_secret, ''), COALESCE(totp_enabled, 0) FROM users where phone_hash=? or phone=? or callsign=? `
-
 	phoneHash := hashIndex(fieldPepperKey, username)
-	row := db.QueryRow(query, phoneHash, username, username)
+	return readUserRecord(db.QueryRow(userRecordSelect+" WHERE phone_hash=? OR phone=? OR callsign=?", phoneHash, username, username))
+}
+
+func getuserByID(id int) (*userinfo, error) {
+	return readUserRecord(db.QueryRow(userRecordSelect+" WHERE id=?", id))
+}
+
+func readUserRecord(row *sql.Row) (*userinfo, error) {
+	r := &userinfo{}
+	var roles string
 	err := row.Scan(&r.ID, &r.PID, &r.Name, &r.Phone,
 		&r.CallSign, &r.Gird, &r.Birthday, &r.MDCID, &r.DMRID,
 		&r.Sex, &r.NickName, &r.OpenID, &r.Avatar, &r.Address, &r.Status,
-		&r.LastLoginTime, &r.LoginErrTimes, &r.LastLoginIP,
-		&r.AlarmMsg, &roles, &r.CreateTime, &r.UpdateTime, &r.ExpireTime, &r.MustChangePwd,
-		&r.LockUntil, &r.TokenVersion,
-		&r.TOTPSecret, &r.TOTPEnabled)
+		&r.LastLoginTime, &r.LoginErrTimes, &r.LastLoginIP, &r.AlarmMsg, &roles,
+		&r.CreateTime, &r.UpdateTime, &r.ExpireTime, &r.MustChangePwd,
+		&r.LockUntil, &r.TokenVersion, &r.TOTPSecret, &r.TOTPEnabled, &r.Introduction, &r.Routes)
 	if err != nil {
-		// ErrNoRows 是正常情况（用户不存在），不记录错误日志
 		if !errors.Is(err, sql.ErrNoRows) {
-			log.Println("getuser by username err :", err, "\n", query)
+			log.Println("read user record:", err)
 		}
 		return nil, err
 	}
-
 	r.Roles = strings.Split(roles, ",")
 	r.Phone = decryptField(fieldAESKey, r.Phone)
-
 	return r, nil
 }
 
@@ -301,36 +300,6 @@ func getUserCached(username string) (*userinfo, error) {
 		return v.(*userinfo), nil
 	}
 	return getuser(username)
-}
-
-func getuserByID(id int) (*userinfo, error) {
-	r := &userinfo{}
-	var roles string
-
-	query := `SELECT id,pid,name,phone,
-	callsign,gird,birthday,mdcid,dmrid,
-	sex,nickname,openid,avatar,address, status,
-	last_login_time, login_err_times, last_login_ip,
-	alarm_msg,roles,create_time,update_time,expire_time,must_change_pwd,
-	COALESCE(lock_until, 0), COALESCE(token_version, 1),
-	COALESCE(totp_secret, ''), COALESCE(totp_enabled, 0) FROM users where id=? `
-
-	row := db.QueryRow(query, id)
-	err := row.Scan(&r.ID, &r.PID, &r.Name, &r.Phone,
-		&r.CallSign, &r.Gird, &r.Birthday, &r.MDCID, &r.DMRID,
-		&r.Sex, &r.NickName, &r.OpenID, &r.Avatar, &r.Address, &r.Status,
-		&r.LastLoginTime, &r.LoginErrTimes, &r.LastLoginIP,
-		&r.AlarmMsg, &roles, &r.CreateTime, &r.UpdateTime, &r.ExpireTime, &r.MustChangePwd,
-		&r.LockUntil, &r.TokenVersion,
-		&r.TOTPSecret, &r.TOTPEnabled)
-	if err != nil {
-		log.Println("getuser by id err :", err, "\n", query)
-		return nil, err
-	}
-
-	r.Roles = strings.Split(roles, ",")
-	r.Phone = decryptField(fieldAESKey, r.Phone)
-	return r, nil
 }
 
 func getEmpListByRole(role string) ([]userinfo, int) {
@@ -507,13 +476,13 @@ func loginCheck(password string, username string, ip string) ([]string, bool) {
 // 	db.Exec("SELECT password = crypt('123', password) FROM user where mobile_phone=")
 // }
 
-func addUser(e *userinfo) error {
+func addUser(e *userinfo, newPassword string) error {
 
-	if err := validatePassword(e.Password, e.CallSign, e.Phone); err != nil {
+	if err := validatePassword(newPassword, e.CallSign, e.Phone); err != nil {
 		return err
 	}
 
-	password, err := bcrypt.GenerateFromPassword([]byte(e.Password), bcrypt.DefaultCost)
+	password, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
 
 	if err != nil {
 		return err
@@ -565,13 +534,7 @@ func addUser(e *userinfo) error {
 		return err
 	}
 
-	fmt.Println(id)
-
-	e.userinit()
-	cacheUserIndexes(e)
-
-	return nil
-
+	return reloadUserIndexes(int(id), nil)
 }
 
 func deleteUser(e *userinfo) error {
@@ -603,64 +566,22 @@ func deleteUser(e *userinfo) error {
 	return nil
 }
 
-func updateUser(e *userinfo) error {
-
-	roles := strings.Join(e.Roles, ",")
-
+func updateUser(e *userinfo, password string) error {
 	phoneToStore := e.Phone
 	if fieldAESKey != nil {
-		if enc, err := encryptField(fieldAESKey, e.Phone); err == nil {
-			phoneToStore = enc
-		}
-	}
-	phoneHash := hashIndex(fieldPepperKey, e.Phone)
-
-	_, err := db.Exec(`update users set name=?,phone=?,sex=?,callsign=?,	mdcid=?,dmrid=?,gird=?,address=?,birthday=?,introduction=?,
-		avatar=?,status=?,alarm_msg=?,expire_time=?,update_time=CURRENT_TIMESTAMP,roles=?,pid=?,phone_hash=?  where id=?`,
-		e.Name, phoneToStore, e.Sex, e.CallSign, e.MDCID, e.DMRID, e.Gird, e.Address, e.Birthday, e.Introduction, e.Avatar, e.Status, e.AlarmMsg, e.ExpireTime, roles, e.PID, phoneHash, e.ID)
-	if err != nil {
-		log.Println("update user failed, ", err)
-		return err
-	}
-
-	if e.Status == 1 {
-		_, err := db.Exec("update users set login_err_times=0  where id=?", e.ID)
-		if err != nil {
-			log.Println("reset user login_err_time failed, ", err)
-			return err
-		}
-
-	}
-
-	if e.Password != "" {
-
-		password, err := bcrypt.GenerateFromPassword([]byte(e.Password), bcrypt.DefaultCost)
-
+		var err error
+		phoneToStore, err = encryptField(fieldAESKey, e.Phone)
 		if err != nil {
 			return err
 		}
-		//	fmt.Println("password:", e.Password, len(e.Password))
-		_, err = db.Exec("update users set password=?  where id=?", password, e.ID)
-		if err != nil {
-			log.Println("update user password failed, ", err)
-			return err
-		}
-
 	}
-
-	// 手机号可能被修改：先清掉旧索引，再写入新值
-	if oldUser, ok := userlist.Load(e.CallSign); ok {
-		if old := oldUser.(*userinfo); old.Phone != "" && old.Phone != e.Phone {
-			userPhoneIndex.Delete(old.Phone)
-		}
-	}
-	e.userinit()
-	cacheUserIndexes(e)
-	mdcidmap.Store(e.MDCID, e.CallSign)
-	dmridmap.Store(e.DMRID, e.CallSign)
-
-	return nil
-
+	fields := `name=?,phone=?,sex=?,callsign=?,mdcid=?,dmrid=?,gird=?,address=?,birthday=?,introduction=?,
+		avatar=?,status=?,alarm_msg=?,expire_time=?,roles=?,pid=?,phone_hash=?,
+		login_err_times=CASE WHEN ?=1 THEN 0 ELSE login_err_times END`
+	args := []any{e.Name, phoneToStore, e.Sex, e.CallSign, e.MDCID, e.DMRID, e.Gird, e.Address, e.Birthday,
+		e.Introduction, e.Avatar, e.Status, e.AlarmMsg, e.ExpireTime, strings.Join(e.Roles, ","), e.PID,
+		hashIndex(fieldPepperKey, e.Phone), e.Status}
+	return saveUserFields(e.ID, fields, args, password, e.CallSign, e.Phone)
 }
 
 func updateUseravatar(e *userinfo) error {
@@ -697,87 +618,66 @@ func updateweixininfo(e wxUserInfo, studentid int) error {
 
 }
 
-func updateUserPassword(id int, password string) error {
-
-	if password != "" {
-		u, _ := getuserByID(id)
-		var callsign, phone string
-		if u != nil {
-			callsign = u.CallSign
-			phone = u.Phone
-		}
-		if err := validatePassword(password, callsign, phone); err != nil {
-			return err
-		}
-
-		passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-
-		if err != nil {
-			return err
-		}
-		//	fmt.Println("password:", e.Password, len(e.Password))
-		_, err = db.Exec("update users set password=?  where id=?", passwordHash, id)
-		if err != nil {
-			log.Println("update user password failed, ", err)
-			return errors.New("passord update err")
-		}
-		revokeUserToken(id, callsign)
-
-	}
-	return nil
-
+func updateUserProfile(u *userinfo, dmrid, mdcid, avatar, password string) error {
+	return saveUserFields(u.ID, "dmrid=?, mdcid=?, avatar=?", []any{dmrid, mdcid, avatar}, password, u.CallSign, u.Phone)
 }
 
-func updateUserProfile(id int, dmrid string, mdcid string, avatar string, password string) error {
-	_, err := db.Exec(`update users set dmrid=?, mdcid=?, avatar=?, update_time=CURRENT_TIMESTAMP where id=?`, dmrid, mdcid, avatar, id)
-	if err != nil {
-		log.Println("update user profile failed, ", err)
-		return err
-	}
+// 串行发布账号写入和缓存刷新，避免后完成的请求把旧令牌版本写回缓存。
+var userWriteMu sync.Mutex
 
+// fields 只接受调用方写死的列赋值，所有数据用 SQL 参数传入。
+func saveUserFields(id int, fields string, args []any, password, callsign, phone string) error {
+	query := "UPDATE users SET update_time=CURRENT_TIMESTAMP"
+	if fields != "" {
+		query += ", " + fields
+	}
 	if password != "" {
-		u, _ := getuserByID(id)
-		var callsign, phone string
-		if u != nil {
-			callsign = u.CallSign
-			phone = u.Phone
-		}
 		if err := validatePassword(password, callsign, phone); err != nil {
 			return err
 		}
-		passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
 			return err
 		}
-
-		_, err = db.Exec("update users set password=? where id=?", passwordHash, id)
-		if err != nil {
-			log.Println("update user profile password failed, ", err)
-			return errors.New("passord update err")
-		}
-		revokeUserToken(id, callsign)
+		query += ", password=?, must_change_pwd=0, token_version=COALESCE(token_version, 1)+1"
+		args = append(args, hash)
 	}
-
-	u, err := getuserByID(id)
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
+	current, err := getuserByID(id)
 	if err != nil {
-		log.Println("reload user profile failed, ", err)
 		return err
 	}
+	if _, err := db.Exec(query+" WHERE id=?", append(args, id)...); err != nil {
+		return err
+	}
+	return reloadUserIndexes(current.ID, current)
+}
 
-	if oldUser, ok := userlist.Load(u.CallSign); ok {
-		old := oldUser.(*userinfo)
+func reloadUserIndexes(id int, old *userinfo) error {
+	u, err := getuserByID(id)
+	if err != nil {
+		return err
+	}
+	cached, cachedOK := userlist.Load(u.CallSign)
+	if old != nil {
+		if old.CallSign != u.CallSign || old.Phone != u.Phone {
+			uncacheUserIndexes(old)
+		}
 		if old.MDCID != "" && old.MDCID != u.MDCID {
 			mdcidmap.Delete(old.MDCID)
 		}
 		if old.DMRID != "" && old.DMRID != u.DMRID {
 			dmridmap.Delete(old.DMRID)
 		}
-		if old.Phone != "" && old.Phone != u.Phone {
-			userPhoneIndex.Delete(old.Phone)
-		}
 	}
-
-	u.userinit()
+	if cachedOK && cached.(*userinfo).ID == u.ID {
+		previous := cached.(*userinfo)
+		u.Groups, u.DevList = previous.Groups, previous.DevList
+		u.TalkDuration, u.TalkTimes = previous.TalkDuration, previous.TalkTimes
+	} else {
+		u.userinit()
+	}
 	cacheUserIndexes(u)
 	if u.MDCID != "" {
 		mdcidmap.Store(u.MDCID, u.CallSign)
@@ -785,18 +685,14 @@ func updateUserProfile(id int, dmrid string, mdcid string, avatar string, passwo
 	if u.DMRID != "" {
 		dmridmap.Store(u.DMRID, u.CallSign)
 	}
-
 	return nil
 }
 
-func revokeUserToken(id int, callsign string) {
-	_, err := db.Exec("UPDATE users SET token_version = COALESCE(token_version, 1) + 1 WHERE id=?", id)
-	if err != nil {
-		log.Println("revokeUserToken db update failed:", err)
+func revokeUserToken(id int) error {
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
+	if _, err := db.Exec("UPDATE users SET token_version = COALESCE(token_version, 1) + 1 WHERE id=?", id); err != nil {
+		return err
 	}
-	if callsign != "" {
-		if v, ok := userlist.Load(strings.ToUpper(callsign)); ok {
-			v.(*userinfo).TokenVersion++
-		}
-	}
+	return reloadUserIndexes(id, nil)
 }

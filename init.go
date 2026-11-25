@@ -695,13 +695,6 @@ func validatePassword(pw string, callsign string, phone string) error {
 	return nil
 }
 
-func clearMustChangePwd(userID int) {
-	_, err := db.Exec("UPDATE users SET must_change_pwd=0 WHERE id=?", userID)
-	if err != nil {
-		log.Printf("[bootstrap] clear must_change_pwd flag for user %d error: %v", userID, err)
-	}
-}
-
 // initBMNetworkSchema 负责初始化 NRL-BM (模型 202) 专属网络配置与桥接状态表结构
 func initBMNetworkSchema() {
 	initBMNetworkTables()

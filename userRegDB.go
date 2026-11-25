@@ -186,7 +186,6 @@ func addUserReg(ctx context.Context, u *reguser) error {
 	e := &userinfo{
 		Name:     r.Name,
 		Phone:    phoneDecrypted,
-		Password: r.Password,
 		CallSign: r.CallSign,
 		Birthday: r.Birthday,
 		Sex:      r.Sex,
@@ -234,7 +233,7 @@ func addUserReg(ctx context.Context, u *reguser) error {
 	e.Avatar = conf.WeiXin.AvatarURL
 
 	res, err := stmt.Exec(e.PID, e.Name, phoneToStore, e.Sex, e.CallSign, e.Gird, e.Address, e.Birthday, e.Introduction, e.NickName, e.OpenID, e.LastLoginIP, e.LastLoginTime,
-		e.Avatar, e.Status, e.Password, "ham", e.AlarmMsg, phoneHash)
+		e.Avatar, e.Status, r.Password, "ham", e.AlarmMsg, phoneHash)
 
 	if err != nil {
 		log.Println("add user failed 2, ", err, '\n', query)
@@ -258,12 +257,7 @@ func addUserReg(ctx context.Context, u *reguser) error {
 		return err
 	}
 
-	fmt.Println(id)
-
-	e.userinit()
-	userlist.Store(e.CallSign, e)
-
-	return nil
+	return reloadUserIndexes(int(id), nil)
 
 }
 
