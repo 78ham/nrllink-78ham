@@ -1,105 +1,64 @@
 package main
 
 import (
-	"fmt"
+	"database/sql"
+	"encoding/json"
 	"log"
 	"net/http"
-
-	jsoniter "github.com/json-iterator/go"
+	"strings"
 )
-
-// type routes struct {
-// 	Path      string `json:"path"`
-// 	Component string `json:"component"`
-// 	Hidden    bool `json:"hidden"`
-// 	Children  []routes `json:"children"`
-// }
-
-type routes struct {
-	Routes jsoniter.RawMessage `json:"routes" db:"routes"`
-}
-
-func getRoutes() *routes {
-	r := &routes{}
-
-	// 只取 routes 列；database/sql 不支持把整行 Scan 进结构体
-	query := "SELECT routes from routes "
-
-	row := db.QueryRow(query)
-	err := row.Scan(&r.Routes)
-	if err != nil {
-		log.Println("query routes err:", err, r)
-	}
-	return r
-
-}
-
-func setRoutes(route string) error {
-	_, err := db.Exec("UPDATE routes SET routes=?", route)
-	if err != nil {
-		log.Println("save routes err:", err)
-	}
-	return err
-}
 
 func (j *jsonapi) httpGetRoutes(w http.ResponseWriter, req *http.Request) {
 	sethttphead(w)
-
-	_, err := checktoken(w, req)
-	if err != nil {
+	if _, err := checktoken(w, req); err != nil {
 		return
 	}
 
-	// type responseinfo struct {
-	// 	Code int    `json:"code"`
-	// 	Data routes `json:"data"`
-	// }
-
-	// r := responseinfo{Code: 20000, Data: getRoutes()}
-	// rescode, _ := jsonextra.Marshal(r)
-	// w.Write(rescode)
-	res := fmt.Sprintf(`{"code":20000,"data":%v}`, string(getRoutes().Routes))
-	w.Write([]byte(res))
-
+	var value string
+	err := db.QueryRow("SELECT COALESCE(routes, '') FROM routes ORDER BY id LIMIT 1").Scan(&value)
+	if err != nil && err != sql.ErrNoRows {
+		log.Println("query routes:", err)
+		writeJSONResponseOpError(w)
+		return
+	}
+	if strings.TrimSpace(value) == "" {
+		value = "[]"
+	}
+	if !json.Valid([]byte(value)) {
+		writeJSONResponseError(w, "路由配置不是有效的 JSON")
+		return
+	}
+	writeJSONEnvelope(w, 20000, json.RawMessage(value))
 }
+
 func (j *jsonapi) httpSetRoutes(w http.ResponseWriter, req *http.Request) {
 	sethttphead(w)
-
 	u, err := checktoken(w, req)
 	if err != nil {
 		return
 	}
-
 	if !checkrole(u, []string{"admin"}) {
-		w.Write([]byte("{\"code\":20000,\"data\":{\"message\":\"当前用户没有权限设置此参数\"}}"))
+		writeJSONResponseRightError(w)
 		return
-
 	}
-
-	result, ok := readRequestBody(w, req)
+	body, ok := readRequestBody(w, req)
 	if !ok {
 		return
 	}
-
-	// stb := &routes{}
-	// err := jsonextra.Unmarshal(result, &stb)
-
-	// if err != nil {
-	// 	fmt.Println("opadd err :", err)
-	// 	w.Write([]byte("{\"code\":20000,\"data\":{\"message\":\"新增用户失败\"}}"))
-	// 	return
-	// }
-
-	// r := getRoleByID(stb.Position)
-	// stb.Roles = []string{r.NameKey}
-
-	// addUser(stb)
-	if len(result) > 10 {
-		setRoutes(string(result))
-		addOperatorLog("", "routes修改成功", u)
-		w.Write([]byte("{\"code\":20000,\"data\":{\"message\":\"routes修改成功\"}}"))
-	} else {
-		w.Write([]byte("{\"code\":20000,\"data\":{\"message\":\"routes修改失败\"}}"))
+	if !json.Valid(body) {
+		writeJSONResponseParamError(w)
+		return
 	}
 
+	// 首次写入创建记录，升级已有数据库时沿用原记录的 ID。
+	_, err = db.Exec(`INSERT INTO routes (id, routes)
+		VALUES ((SELECT COALESCE(MIN(id), 1) FROM routes), ?)
+		ON CONFLICT(id) DO UPDATE SET routes=excluded.routes`, string(body))
+	if err != nil {
+		log.Println("save routes:", err)
+		writeJSONResponseOpError(w)
+		return
+	}
+	addOperatorLog("", "routes修改成功", u)
+	writeJSONResponseMessage(w, "routes修改成功", 20000)
 }

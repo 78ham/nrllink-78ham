@@ -103,8 +103,10 @@ func (j *jsonapi) httpTotalStats(w http.ResponseWriter, req *http.Request) {
 	stats := totalStatsSnapshot()
 	stats.DevNumber = devMapLen()
 	stats.OnlineDevNumber = currentOnlineDeviceCount()
-	stats.UserNumber = 1000
-	//totalstats.UserNumber = len(userlist)
+	if err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&stats.UserNumber); err != nil {
+		writeJSONResponseError(w, "查询用户数量失败")
+		return
+	}
 
 	rescode, _ := jsonextra.Marshal(stats)
 

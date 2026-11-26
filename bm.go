@@ -188,13 +188,16 @@ func (j *jsonapi) httpBMNetworkUpdate(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	var n BMNetwork
+	var n struct {
+		BMNetwork
+		Password *string `json:"password"`
+	}
 	if err := jsonextra.Unmarshal(body, &n); err != nil || n.ID <= 0 {
 		w.Write(ResParmErr)
 		return
 	}
 
-	if err := updateBMNetwork(&n); err != nil {
+	if err := updateBMNetwork(&n.BMNetwork, n.Password); err != nil {
 		log.Printf("[bm] update network error: %v", err)
 		writeJSONResponseOpError(w)
 		return
@@ -309,7 +312,9 @@ func (j *jsonapi) httpBMBridgeStop(w http.ResponseWriter, req *http.Request) {
 
 func (j *jsonapi) httpBMBridgeStatus(w http.ResponseWriter, req *http.Request) {
 	sethttphead(w)
-	_, _ = checktoken(w, req)
+	if _, err := checktoken(w, req); err != nil {
+		return
+	}
 
 	deviceID := 0
 	if deviceIDStr := req.URL.Query().Get("device_id"); deviceIDStr != "" {
@@ -320,13 +325,22 @@ func (j *jsonapi) httpBMBridgeStatus(w http.ResponseWriter, req *http.Request) {
 		var payload struct {
 			DeviceID int `json:"device_id"`
 		}
-		if body, ok := readRequestBody(w, req); ok {
-			_ = jsonextra.Unmarshal(body, &payload)
-			deviceID = payload.DeviceID
+		body, ok := readRequestBody(w, req)
+		if !ok {
+			return
 		}
+		if len(body) > 0 && jsonextra.Unmarshal(body, &payload) != nil {
+			writeJSONResponseParamError(w)
+			return
+		}
+		deviceID = payload.DeviceID
 	}
 
-	bridge, _ := getBMBridgeByDevice(deviceID)
+	bridge, err := getBMBridgeByDevice(deviceID)
+	if err != nil {
+		writeJSONResponseOpError(w)
+		return
+	}
 	if bridge == nil {
 		bridge = &BMBridge{
 			DeviceID: deviceID,

@@ -655,7 +655,7 @@ Query: ?token=<JWT>
 > 获取前端路由配置(原始JSON)
 
 **`POST /roles/updateroutes`**
-> 更新前端路由配置(admin only, 最少10字符)
+> 更新前端路由配置(admin only, 有效 JSON)
 
 ---
 

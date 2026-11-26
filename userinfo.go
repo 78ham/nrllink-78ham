@@ -14,7 +14,6 @@ func initAllUserList() {
 	dmrid,
 	gird,
 	phone,
-	password,
 	birthday,
 	sex,
 	avatar,
@@ -33,7 +32,8 @@ func initAllUserList() {
 	last_login_ip,
 	expire_time,
 	COALESCE(lock_until, 0),
-	COALESCE(token_version, 1)
+	COALESCE(token_version, 1),
+	COALESCE(must_change_pwd, 0), COALESCE(totp_enabled, 0)
 	FROM users where status=1`)
 
 	if err != nil {
@@ -49,12 +49,12 @@ func initAllUserList() {
 
 		err := rows.Scan(&user.ID, &user.Name, &user.CallSign,
 			&user.MDCID, &user.DMRID, &user.Gird,
-			&user.Phone, &user.Password,
+			&user.Phone,
 			&user.Birthday, &user.Sex, &user.Avatar, &user.Address,
 			&roles, &user.Introduction, &user.AlarmMsg,
 			&user.Status, &user.UpdateTime, &user.LastLoginTime, &user.LoginErrTimes,
 			&user.CreateTime, &user.OpenID, &user.NickName, &user.PID, &user.LastLoginIP, &user.ExpireTime,
-			&user.LockUntil, &user.TokenVersion)
+			&user.LockUntil, &user.TokenVersion, &user.MustChangePwd, &user.TOTPEnabled)
 		if err != nil {
 			log.Println("query  all user rows err:", err)
 			continue
