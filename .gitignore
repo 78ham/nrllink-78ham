@@ -31,6 +31,6 @@ docker-compose.override.yml
 .codex/
 .playwright-cli/
 
-# Frontend build artifacts (www/ is the built-in frontend)
-www/dist/
-www/node_modules/
+# Frontend build artifacts (frontend lives in the nrllink-web-78ham repo)
+dist/
+node_modules/

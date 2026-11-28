@@ -1,4 +1,4 @@
-# NRL Link - 通过网络连接无线电
+﻿# NRL Link - 通过网络连接无线电
 
 NRL Link 是一个基于 Go 语言的 UDP 语音转发服务器，配合 NRL 系列硬件盒子（NRL2100/2200/2300/3188/2600等）和 Vue3 Web 前端，实现无线电设备（模拟中继、手台、公网台、手机App等）的跨地域互联互通。
 
@@ -49,7 +49,7 @@ NRL Link 是一个基于 Go 语言的 UDP 语音转发服务器，配合 NRL 系
                                             │
                           ┌─────────────────┼─────────────────┐
                           ▼                 ▼                  ▼
-                   其他 NRL 服务器    APRS-IS 网络     WeChat/OpenAI
+                   其他 NRL 服务器    APRS-IS 网络           外部平台桥接
 ```
 
 ---
@@ -93,16 +93,11 @@ nrllink-78ham/
 │
 ├── billing.go               # 计费(套餐/微信支付Native/订单/延期)
 │
-├── weixin.go                # 微信公众号(消息/菜单/绑定/小程序登录)
-├── weixinsdk.go             # 微信SDK(AES加解密/XML解析/签名验证)
-├── weixinSendMessage.go     # 微信模板消息(登录成功/失败/绑定确认)
-├── weixinUserInfo.go        # 微信用户数据层
 │
 ├── aprs.go                  # APRS客户端(位置上报/状态上报/自发现)
 ├── aprsget.go               # APRS服务器发现(aprs.tv API查询)
 ├── serverList.go            # 平台服务器同步(nrlptt.com上报/同步)
 │
-├── chatgpt.go               # OpenAI集成(GPT对话/上下文管理)
 ├── control.go               # 设备EEPROM参数结构体与解码(1W/2W/Moto模块)
 │
 ├── token.go                 # JWT令牌(生成/验证/HMAC-SHA256)
@@ -134,8 +129,7 @@ nrllink-78ham/
 镜像由 GitHub Actions 在推送到 `sqlite`/`main` 分支或打 `v*` tag 时自动构建并发布到 `ghcr.io/78ham/nrllink:latest`。
 镜像**只含后端服务**，自带一份中性的默认配置，开箱即可提供接口、WebSocket 与设备接入。
 
-> **前端说明**：本仓库的 `www/` 是开发用的测试前端，**不随镜像分发**。
-> 生产前端请用 [nrllink-web-78ham](https://github.com/78ham/nrllink-web-78ham) 仓库的编排：
+> **前端说明**：生产前端在 [nrllink-web-78ham](https://github.com/78ham/nrllink-web-78ham) 独立仓库，
 > 那里是**前端容器 + 后端容器**的完整拓扑（同一编排、同一 Docker 网络组），
 > 前端容器（nginx）对公网提供页面，并把 `/api`、`/ws`、`/uploads` 转发到本容器，
 > 前后端在容器网络里用服务名 `nrllink` 互访，不经过宿主机端口。
@@ -186,18 +180,18 @@ docker compose logs nrllink | grep -A3 "默认管理员"
 - 想改平台名 / ICP / APRS / 微信 / 计费等：准备一份 `config/udphub.yaml`，在 `docker-compose.yml` 里取消对应的挂载注释，启动脚本会优先加载 `/nrllink/conf/udphub.yaml`。
 - 常用项可以直接用环境变量覆盖，无需改配置：`NRL_DBFILE`、`NRL_WEBPATH`、`NRL_IPFILE`、`NRL_TOKEN_KEY`（JWT 签名密钥，**生产务必设置**，否则每次重启登录态失效）。
 
-### 开发用测试前端（www/）
+### 开发用测试前端
 
-仓库根的 `www/` 是一个精简的测试前端（Vue 3 + Vite + Naive UI + PWA），用于本地联调后端接口，**不随 Docker 镜像分发**。
+测试前端已从本仓库移除，联调后端接口请直接 clone 生产前端仓库：
 
 ```bash
-cd www
+git clone https://github.com/78ham/nrllink-web-78ham.git
+cd nrllink-web-78ham
 npm install
 npm run dev      # Vite 会把 /api、/ws 代理到 http://localhost:9000
-npm run build    # 输出 www/dist/
 ```
 
-要临时看页面，把 `www/dist/` 挂到容器的 `/nrllink/www` 即可；正式部署请用 nrllink-web 仓库。
+正式部署同样使用 nrllink-web 仓库的编排。
 
 ### 直接运行
 ```bash
@@ -239,7 +233,6 @@ main()
   ├── execDDL()                                # 无条件、幂等、全量建表(schema唯一来源)
   ├── updatedb()                               # 增量Schema迁移检查与执行(每条仅一次)
   ├── ensureBootstrap()                        # 启动引导(首次启动创建默认管理员/记录meta元数据)
-  ├── chatgptInit()                            # 初始化OpenAI客户端
   ├── initPublicGroup()                        # 初始化房间0(公共大厅)+房间999(全网互通)
   ├── initAllUserList()                        # 加载所有用户(创建3个私有房间)
   ├── initAllDevList()                         # 加载所有设备(加入对应群组)
@@ -248,7 +241,6 @@ main()
   ├── go jsonhttp.init()                       # 启动HTTP服务器
   ├── go callWSHub.run()                       # 启动WebSocket通话Hub
   ├── go saveLog()                             # 启动日志保存
-  ├── go cronGetWxToken()                      # 启动微信Token定时刷新(每小时)
   ├── go checkdeviceOnline()                   # 启动设备在线监控(每5s)
   ├── go aprs.OnLoad()                         # 启动APRS上报
   │
@@ -276,9 +268,7 @@ type config struct {
     Web         WebConfig        // 静态文件路径、HTTP端口(9000)、TokenKey、ICP备案号、SSL证书
     PlatformList []Platformitem  // 配置文件中的平台服务器列表(初始值)
     SystemInfo   SystemInfo      // 平台名称(火链)、简称、LogoURL、语言
-    OpenAI      OpenAIConfig     // BaseURL、APIKEY、Engine(Azure兼容)
     APRS        APRSConfig       // 服务器地址、自地址、呼号、坐标、高度
-    WeiXin      WeiXinConfig     // 公众号/小程序AppID/AppSecret、模板消息ID、菜单配置
     Billing     BillingConfig    // 启用开关、过期重检间隔、微信支付配置
 }
 ```
@@ -575,7 +565,7 @@ const (
 - 支持按手机号或呼号登录
 - 密码使用bcrypt加密验证
 - 记录登录IP和时间
-- 失败3次发送微信告警
+- 失败3次记录告警日志
 
 **`GET /user/info`**
 > 获取当前用户信息(含菜单路由和角色)
@@ -1049,35 +1039,6 @@ Query: ?type=1&pinned=true&page=1&limit=10
 > AEAD_AES_256_GCM解密→验签→标记已支付→延长用户过期时间
 
 ---
-
-### 微信接口
-
-**`POST /api/msg/weixin`**
-> 微信公众号消息/事件回调(echostr验证/订阅/取消订阅/菜单点击/文本消息)
-
-**`POST /weixinreturn/msgstatus`**
-> 微信模板消息状态回执
-
-**`POST /weixin/phonecode`**
-> CRM手机绑定码校验
-
-**`POST /weixin/mpphonecode`**
-> 小程序手机绑定(校验access key+绑定码→发送成功模板消息)
-
-**`POST /weixin/wxmsg`**
-> 查询微信消息记录
-
-**`GET /api/getwxmsg`**
-> 获取微信媒体文件内容(图片/视频)
-```
-Query: ?media_type=image&media_id=xxx
-```
-
-**`POST /api/weixin/wxlogin/teacher`**
-> 小程序code换session登录
-```json
-{"code":"wx_code_xxx","appid":"...","secret":"..."}
-```
 
 ---
 
@@ -1599,11 +1560,6 @@ systeminfo:
   logourl: ""                             # Logo URL
   language: "zh"                          # 默认语言
 
-openai:
-  baseurl: ""       # OpenAI Base URL(空=默认, 填写=自定义/Azure)
-  apikey: ""        # API Key
-  engine: ""        # Azure引擎名(空=标准API, 填写=Azure模式)
-
 aprs:
   serverhost: asia.aprs2.net    # APRS-IS服务器
   serverport: "14580"           # APRS-IS端口
@@ -1616,31 +1572,6 @@ aprs:
   longitude: 118.2511           # 经度(十进制度)
   altitude: "50"                # 高度
 
-weixin:
-  mpappid: ""              # 公众号AppID
-  mpappsecret: ""          # 公众号AppSecret
-  phonecodeurl: ""         # 手机绑定URL
-  avatarurl: ""            # 默认头像URL
-  servertoken: ""          # 服务器Token
-  serverurl: ""            # 服务器URL
-  accesstoken: ""          # AccessToken(自动获取)
-  accesskey: ""            # AccessKey
-  appid: ""                # 小程序AppID
-  appsecret: ""            # 小程序AppSecret
-  encodingaeskey: ""       # 消息加解密密钥
-  weixinwelcome: "欢迎关注" # 欢迎语
-  defaultkeywords: "默认回复" # 默认回复
-  weixinmenu: ""           # 自定义菜单JSON
-  alarmmodeid: ""          # 告警模板ID
-  # 模板消息ID(自动获取)
-  typephonecodeid: ""      # 绑定码模板ID
-  typeloginsuccessid: ""   # 登录成功模板ID
-  typeloginfailid: ""      # 登录失败模板ID
-  # 关键词回复映射
-  clickeventmap: {}        # 菜单事件→回复
-  keywordsmap: {}          # 关键词→回复
-
-billing:
   enabled: false                        # 计费开关
   accountexpirerechecksecs: 300         # 过期重检间隔(秒)
   packageunitpricecents: 0              # 默认单价
@@ -1816,34 +1747,6 @@ APRS统计查询:
   → 获取全网 NRLSRV/NRLBOX/NRLAPP/NRLMP 总数
 ```
 
-### 微信集成
-
-```
-微信公众号:
-  - echostr URL验证
-  - 关注/取消关注事件处理
-  - 自定义菜单(POST微信API)
-  - 菜单CLICK事件(查通话统计/获取绑定码)
-  - 文本消息(GPT自动回复/关键词匹配)
-  - 模板消息(登录成功/失败/绑定确认)
-  - AccessToken自动刷新(每60分钟)
-
-小程序:
-  - jscode2session换取OpenID/SessionKey
-  - 手机号绑定(获取绑定码→模板消息通知)
-  - HAM用户登录(unionid匹配)
-```
-
-### OpenAI / ChatGPT
-
-```
-ChatGPT集成:
-  - 支持标准OpenAI API和Azure API
-  - 用户级上下文管理(sync.Map, 最多5轮对话)
-  - 触发关键词: "复位"/"结束会话"/"重新开始"/"reset" → 清空上下文
-  - 首次对话注入预设帮助系统提示词
-  - 在微信公众号文本消息中触发
-```
 
 ---
 
@@ -1999,7 +1902,6 @@ goreleaser release --snapshot --clean
 | 配置 | YAML (gopkg.in/yaml.v3) |
 | JSON | json-iterator (高性能) |
 | IP地理 | ipdb-go (ipip.net) |
-| AI | go-openai |
 | 容器化 | Docker + Alpine |
 | 打包 | GoReleaser (多平台+系统包) |
 
