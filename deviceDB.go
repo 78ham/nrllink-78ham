@@ -141,6 +141,10 @@ func checkdeviceOnline() {
 					vvv.udpAddr = nil
 					vvv.addrStr = ""
 					change = true
+
+					// 插件钩子：设备离线（异步派发）
+					hookRegistry.DispatchAsync(&HookEvent{Hook: HookDeviceOffline, Time: time.Now(), Device: vvv, Group: vv})
+
 					continue
 				}
 

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -11,10 +12,29 @@ type Aprs struct {
 	Timer     *time.Ticker
 	tcpClient *TCPClient
 	errorChan chan error
+	stop      chan struct{} // 插件系统停止信号（RequestStop 关闭）
+	stopOnce  sync.Once
 }
 
 func NewAPRS() *Aprs {
-	return &Aprs{}
+	return &Aprs{stop: make(chan struct{})}
+}
+
+// RequestStop 请求停止：关闭停止信号并释放资源（插件 OnUnload 调用）
+func (a *Aprs) RequestStop() {
+	a.stopOnce.Do(func() {
+		close(a.stop)
+	})
+	a.OnUnload()
+}
+
+func (a *Aprs) stopped() bool {
+	select {
+	case <-a.stop:
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *Aprs) OnLoad() {
@@ -27,23 +47,39 @@ func (a *Aprs) OnLoad() {
 
 	for {
 
+		if a.stopped() {
+			return
+		}
+
+		a.errorChan = make(chan error, 1)
+
 		a.tcpClient = NewTCPClient(conf.APRS.APRSServerHost, conf.APRS.APRSServerPort, a.handleTcpMessage)
 		a.tcpClient.Connect()
 
 		a.Login()
+
+		if a.stopped() {
+			a.tcpClient.Close()
+			return
+		}
 
 		time.Sleep(time.Second * 5)
 
 		// 重新启动 ticker
 		a.startLocationWatch()
 
-		err := <-a.errorChan
+		var err error
+		select {
+		case <-a.stop:
+			a.tcpClient.Close()
+			return
+		case err = <-a.errorChan:
+		}
 
 		a.tcpClient.Close()
 
 		time.Sleep(time.Second * 5)
 		fmt.Printf("APRS 发送错误，重新初始化TCP连接: %v\n", err)
-
 	}
 
 }
@@ -98,6 +134,9 @@ func (a *Aprs) Login() {
 	}
 
 	for {
+		if a.stopped() {
+			return
+		}
 		err := a.tcpClient.Send(fmt.Sprintf("user %s pass %d vers NRL 1.0\n", conf.APRS.CallSign, passcode))
 
 		if err != nil {

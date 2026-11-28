@@ -537,6 +537,9 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 			return
 		}
 
+		// 插件钩子：语音转发前（异步派发，无订阅者时零开销）
+		hookRegistry.DispatchAsync(&HookEvent{Hook: HookVoiceBeforeForward, Time: nrl.timeStamp, Device: dev, Group: gp, Packet: packet})
+
 		forwardVoice(nrl, dev, packet, gp)
 
 	case 2:
@@ -608,6 +611,9 @@ func NRL21parser(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDP
 			}
 
 			dev.ISOnline = true
+
+			// 插件钩子：设备上线（异步派发）
+			hookRegistry.DispatchAsync(&HookEvent{Hook: HookDeviceOnline, Time: time.Now(), Device: dev, Group: gp})
 
 		}
 
@@ -1008,6 +1014,9 @@ func forwardServerVoice(nrl *NRL21packet, dev *deviceInfo, packet []byte, conn *
 // 文本消息转发
 func forwardMsg(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDPConn, connpool *currentConnPool) {
 
+	// 插件钩子：文本消息转发前（异步派发，无订阅者时零开销）
+	hookRegistry.DispatchAsync(&HookEvent{Hook: HookMsgBeforeForward, Time: time.Now(), Device: dev, Packet: packet})
+
 	clientAddrStr := nrl.UDPAddr.String()
 
 	//200设备转发给其他设备
@@ -1108,6 +1117,9 @@ func forwardMsg(nrl *NRL21packet, packet []byte, dev *deviceInfo, conn *net.UDPC
 
 // forwardCtl forwardCtl
 func forwardCtl(nrl *NRL21packet, packet []byte, conn *net.UDPConn, gp *group) {
+
+	// 插件钩子：控制信令转发前（异步派发，无订阅者时零开销）
+	hookRegistry.DispatchAsync(&HookEvent{Hook: HookCtlBeforeForward, Time: time.Now(), Group: gp, Packet: packet})
 
 	numbs := gp.connPool.count()
 

@@ -51,8 +51,6 @@ func main() {
 
 	ensureBootstrap()
 
-	chatgptInit()
-
 	initAllUserList()
 
 	initPublicGroup()
@@ -65,11 +63,10 @@ func main() {
 	logbuffer = make(chan *deviceInfo, 1000)
 	go saveLog()
 
-	go cronGetWxToken()
-
 	go checkdeviceOnline()
 
-	go NewAPRS().OnLoad()
+	// 插件系统：加载全部已启用插件（APRS 已迁移为首个内置插件）
+	pluginLoadAll()
 
 	//go findNRL()
 

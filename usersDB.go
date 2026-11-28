@@ -516,7 +516,7 @@ func addUser(e *userinfo, newPassword string) error {
 	defer stmt.Close()
 
 	//	e.Avatar = "https://wpimg.wallstcn.com/f778738c-e4f8-4870-b634-56703b4acafe.gif"
-	e.Avatar = conf.WeiXin.AvatarURL
+	e.Avatar = "" // 默认头像留空，由前端展示占位图
 
 	res, err := stmt.Exec(e.PID, e.Name, phoneToStore, e.Sex, e.CallSign, e.MDCID, e.DMRID, e.Gird, e.Address, e.Birthday, e.Introduction, e.NickName, e.OpenID, e.LastLoginIP, e.LastLoginTime,
 		e.Avatar, e.Status, password, roles, e.AlarmMsg, e.ExpireTime, phoneHash)
@@ -596,22 +596,6 @@ func updateUseravatar(e *userinfo) error {
 	if u, okok := userlist.Load(e.CallSign); okok {
 		u.(*userinfo).Avatar = e.Avatar
 
-	}
-
-	return nil
-
-}
-
-func updateweixininfo(e wxUserInfo, studentid int) error {
-
-	//'25001'||to_char(now(),'YYMMDDHHMMSS')||to_char(id,'fm00000')||to_char(ceil(random()*(100-1)+1),'fm00')+
-
-	//卡号自动生成， 校区编号+年月日时分秒+学员ID+随机数
-
-	_, err := db.Exec(`UPDATE students set openid=?,avatar=?,nickname=?,update_time=now() where id=?`, e.OpenID, e.Headimgurl, e.NickName, studentid)
-	if err != nil {
-		log.Println("update Student weixin phonecode, ", err)
-		return err
 	}
 
 	return nil

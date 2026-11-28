@@ -230,7 +230,7 @@ func addUserReg(ctx context.Context, u *reguser) error {
 	}
 	defer stmt.Close()
 
-	e.Avatar = conf.WeiXin.AvatarURL
+	e.Avatar = "" // 默认头像留空，由前端展示占位图
 
 	res, err := stmt.Exec(e.PID, e.Name, phoneToStore, e.Sex, e.CallSign, e.Gird, e.Address, e.Birthday, e.Introduction, e.NickName, e.OpenID, e.LastLoginIP, e.LastLoginTime,
 		e.Avatar, e.Status, r.Password, "ham", e.AlarmMsg, phoneHash)

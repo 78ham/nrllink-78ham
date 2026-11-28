@@ -261,14 +261,6 @@ func (j *jsonapi) msghttp() {
 		http.HandleFunc(pattern, handler)
 	}
 
-	registerRoute("/api/msg/weixin", j.httpWXMsg)               //微信公众号接口
-	registerRoute("/weixinreturn/msgstatus", j.httpWXMsgReturn) //微信回调
-	registerRoute("/weixin/phonecode", j.httpPhoneCode)         //crm自己处理操作员的过来的绑定请求
-	registerRoute("/weixin/mpphonecode", j.httpMPPhoneCode)     //crm自己处理微信小程序后端的过来的绑定请求
-	registerRoute("/weixin/wxmsg", j.httpgetWeiXinMsg)          //查询微信用户发过来的消息
-	registerRoute("/api/getwxmsg", j.httpGetWeiXinMsgContent)
-	registerRoute("/api/weixin/wxlogin/teacher", j.httpMPuserLogin) //小程序登录
-
 	registerRoute("/auth/ws-ticket", j.httpGetWSTicket)
 
 	registerRoute("/platform/info", j.httpplatforminfo)
@@ -418,6 +410,14 @@ func (j *jsonapi) msghttp() {
 	api("/user/totp/verify", j.httpUserTOTPVerify)
 	api("/user/totp/disable", j.httpUserTOTPDisable)
 	api("/auth/totp/login", j.httpAuthTOTPLogin)
+
+	// 插件管理接口
+	api("/plugins", j.httpPluginList)
+	api("/plugins/enable", j.httpPluginEnable)
+	api("/plugins/disable", j.httpPluginDisable)
+	api("/plugins/config", j.httpPluginConfig)
+	api("/plugins/config/update", j.httpPluginConfigUpdate)
+	api("/plugins/bridge/status", j.httpPluginBridgeStatus)
 
 	// WebAuthn Passkey 接口
 	api("/webauthn/register/begin", j.httpWebAuthnRegisterBegin)
